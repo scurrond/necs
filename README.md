@@ -1,5 +1,5 @@
 # necs
-One-Header ECS in Modern C++
+# One-Header ECS in Modern C++
 
 **NECS** (Nano ECS) is a single-header, cache-friendly Entity-Component-System (ECS) library for C++20. Designed for performance and simplicity, NECS supports use in game engines, simulations, or any architecture needing data-oriented design.
 
@@ -10,7 +10,7 @@ One-Header ECS in Modern C++
 - **Header-only** - the library is a single header and can be dropped into any project.
 - **No external dependencies** - uses only the standard library.
 - **Templated** - data is automatically sorted in its correct place.
-- **Cache-friendly** - all the data is structured inside tuples and vectors.
+- **Cache-friendly** - all the data is structured inside tuples and vectors, using an SoA approach & allowing for fast, single-component queries.
 - **Compile-time filtering** - a templated tuple-based approach allows for guaranteed access to component vectors with no type-checking or casts.
 - **Entity lifecycle management** - entities are associated with a state: live, snoozed, sleeping, awake, killed or dead.
 - **Reusable memory** - entity ids and their storage locations are reused to prevent reallocations.
