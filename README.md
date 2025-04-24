@@ -188,7 +188,7 @@ void iterate()
     } 
 
     // Templated, pre-configured queries that iterate through the whole system
-    // It MUST have non-zero amount of storage chunks to iterate through 
+    // A query MUST have a non-zero amount of storage chunks to iterate through 
     auto& query = registry.query<PositionNameQuery>();
 
     // 1. iterate entire system
