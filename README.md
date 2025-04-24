@@ -109,7 +109,7 @@ void create()
 
     // Adds 100 monsters to the system, calls create under the hood
     registry.populate(Monster(), 100);
-};
+}
 ```
 
 ## Checking
@@ -164,7 +164,7 @@ void access()
 
     // GET panics if the type is incorrect or the entity is DEAD
     auto [name3] =  registry.get<Monster, Name>(3);
-};
+}
 ```
 
 ## Iteration
