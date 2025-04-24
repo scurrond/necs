@@ -179,7 +179,7 @@ void iterate()
         name.value = "New name";
     } 
 
-    // Templated, pre-configured queries that iterate through the whole system
+    // Templated, pre-configured queries that filter and iterate through the whole system
     for (auto [id, data] : registry.query<PositionNameQuery>())
     {
         auto& [position, name] = data;
@@ -187,7 +187,7 @@ void iterate()
         name.value = "New name";
     }
 
-    // Dynamic alternative to queries, filter and iterates
+    // Dynamic alternative to queries, filters and iterates
     registry.for_each<Position, Name>
     ([](NECS::EntityId id, NECS::Data<Position&, Name&> data) {
         auto& [position, name] = data;
