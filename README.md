@@ -32,7 +32,7 @@ Currently, NECS supports smaller projects and single-threaded use only. Read: I 
 - Entity data is structured inside tuples and vectors, using an SoA approach & allowing for fast queries. This also allows for compile-time filtering with some template magic.
 - Sleep system: entities are associated with a state and, in addition to their archetype storage, are located in one of two pools: living or sleeping. These are iterated through separately.
 - Dead entities are not considered during iterations, but their ids (indices) are reused (an id-lock system is coming eventually that will allow for ids to be lifetime-unique).
-- Pool memory only grows by default, with dead entities being swapped to the end to allow for reuse. Pools can be manually trimmed but using trim() to remove dead memory.
+- Pool memory only grows by default, with dead entities being swapped to the end to allow for reuse. Pools can be manually trimmed by using trim() to remove dead memory.
 - User-defined events + several built-in ones to track changes to data.
 
 # Getting started
