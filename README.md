@@ -125,41 +125,16 @@ registry.execute(3, NECS::SNOOZE);
 ## Single access
 ```cpp
 // VIEW returns nullopt if entity is dead or the type is incorrect
-auto view = registry.view<Monster, Name>(0);
+auto [name0] = registry.view<Monster, Name>(0).value();
 
-if (view.has_value())
-{
-    auto [name] =  view.value();
-
-    name.value = "New name";
-}
-
-// FIND iterates over every archetype that contains the requested components
-// returns a view
-auto found = registry.find<Name>(1);
-
-if (found.has_value())
-{
-    auto [name] =  found.value();
-
-    name.value = "New name";
-}
+// FIND filters and iterates over every archetype, returns a view
+auto [name1] = registry.find<Name>(1).value();
 
 // REF returns the entire entity related to this id
-auto ref = registry.ref(2);
-
-if (!ref.is_empty() && ref.is_type<Monster>())
-{
-    auto [position, name] = ref.get<Monster>();
-}
+auto [pos, name2] = registry.ref(2).get<Monster>();
 
 // GET panics if the type is incorrect or the entity is DEAD
-if (registry.is_type<Monster>(3) && !registry.is_dead(3))
-{
-    auto [name] =  registry.get<Monster, Name>(3);
-
-    name.value = "New name";
-}
+auto [name3] =  registry.get<Monster, Name>(3);
 ```
 
 ## Iteration
