@@ -63,7 +63,7 @@ struct Name
     std::string value;
 };
 
-struct Position
+struct Position 
 {
     size_t x;
     size_t y;
@@ -76,18 +76,26 @@ struct Position
 using Monster = NECS::Entity<Position, Name>;
 
 // ----------------------------------------------------------------------------
+// Queries
+// ----------------------------------------------------------------------------
+
+using NameQuery = NECS::Query<Name>;
+using PositionQuery = NECS::Query<Position>;
+using PositionNameQuery = NECS::Query<Position, Name>;
+
+// ----------------------------------------------------------------------------
 // Registry data
 // ----------------------------------------------------------------------------
 
 using Archetypes = NECS::Data<Monster>;
 using Events = NECS::Data<>;
 using Singletons = NECS::Data<>;
-using Queries = NECS::Data<>;
+using Queries = NECS::Data<NameQuery, PositionQuery, PositionNameQuery>;
 
 NECS::Registry<Archetypes, Events, Singletons, Queries> registry;
 
-int main()
-{
+int main() 
+{    
     registry.populate(Monster(), 100);
 
     for (auto [id, data] : registry.iter<Monster, Name>())
