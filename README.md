@@ -112,6 +112,27 @@ void create()
 };
 ```
 
+## Checking
+```cpp
+void check()
+{
+    // read-only location info reference for entity with id 0
+    auto& [type, index, state] = registry.info(0);
+
+    // are there any entities of this archetype in living
+    registry.is_empty<Monster>();
+
+    // are there any entities of this archetype in sleeping
+    registry.is_empty<Monster>(true);
+
+    // is the entity with id 0 a monster
+    registry.is_type<Monster>(0);
+
+    // is the entity with id 0 dead
+    registry.is_dead(0);
+}
+```
+
 ## Changing state
 ```cpp
 void change()
