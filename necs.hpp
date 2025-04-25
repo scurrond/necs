@@ -23,7 +23,7 @@ namespace NECS
     namespace Filter
     {
         //==============================
-        // Unique type filtering
+        // id_locked type filtering
         //==============================
 
         template<typename... Tuples>
@@ -39,15 +39,15 @@ namespace NECS
         };
 
         template<typename...>
-        struct unique_types;
+        struct id_locked_types;
 
         template<>
-        struct unique_types<> { using type = std::tuple<>; };
+        struct id_locked_types<> { using type = std::tuple<>; };
 
         template<typename T, typename... Rest>
-        struct unique_types<T, Rest...> 
+        struct id_locked_types<T, Rest...> 
         {
-            using Tail = typename unique_types<Rest...>::type;
+            using Tail = typename id_locked_types<Rest...>::type;
 
             static constexpr bool is_duplicate = (std::is_same_v<T, Rest> || ...);
 
@@ -73,7 +73,7 @@ namespace NECS
             template<typename... Ts>
             struct to_types<std::tuple<Ts...>> 
             {
-                using type = typename unique_types<Ts...>::type;
+                using type = typename id_locked_types<Ts...>::type;
             };
 
             using type = typename to_types<combined>::type;
@@ -165,7 +165,7 @@ namespace NECS
     // // Entity
     // //==========================================================================  
 
-    using EntityId = size_t; // Unique id for entities, used as its reference index.
+    using EntityId = size_t; // id_locked id for entities, used as its reference index.
     using EntityType = std::type_index; // An entity's archetype's type index.
     using EntityIndex = size_t; // The entity's location in its storage.
 
@@ -193,6 +193,7 @@ namespace NECS
         EntityType type = std::type_index(typeid(int));
         EntityIndex index = -1;
         EntityState state = LIVE;
+        bool id_locked = false;
     };
 
     struct EntityRef 
@@ -387,7 +388,7 @@ namespace NECS
     {
         return []<typename... As>(std::tuple<As...>) 
         {
-            using UniqueComponents = typename Filter::merge_types<As...>::type;
+            using id_lockedComponents = typename Filter::merge_types<As...>::type;
 
             return [] <typename... Cs> (std::tuple<Cs...>)
             {   
@@ -399,7 +400,7 @@ namespace NECS
                     Listener<DataUpdated<Cs>>...
                 >{};
             } 
-            (UniqueComponents{});
+            (id_lockedComponents{});
         }
         (T{});
     }
@@ -1069,14 +1070,20 @@ namespace NECS
             return std::get<Storage<A>>(m_storages);
         }
 
-        template <typename A>
-        void call()
+        template <typename E>
+        auto listener() -> Listener<E>&
         {
-            listener<DataUpdated<A>>().call({});
+            return std::get<Listener<E>>(m_listeners);
+        }
+
+        template <typename A>
+        void on_update()
+        {
+            call<DataUpdated<A>>({});
 
             [this]<typename... Cs>(Data<Cs...>)
             {
-                ((listener<DataUpdated<Cs>>().call({})),...);
+                ((call<DataUpdated<Cs>>({})),...);
             }
             (A{});
         }
@@ -1085,7 +1092,7 @@ namespace NECS
         void apply(EntityId id)
         {
             auto& s = storage<A>();
-            auto& [_, index, state] = m_entities.data[id].info;
+            auto& [_, index, state, id_locked] = m_entities.data[id].info;
             
             switch (state)
             {
@@ -1100,7 +1107,10 @@ namespace NECS
                 {
                     EntityId swapped_entity = s.apply_kill(index);
                     m_entities.data[swapped_entity].info.index = index;
-                    m_entities.dead.push_back(id);
+                    if (!id_locked)
+                    {
+                        m_entities.dead.push_back(id);
+                    }
                     break;
                 };
                 case SNOOZED:
@@ -1129,8 +1139,8 @@ namespace NECS
             state = res_state;
             if (run_callbacks) 
             {
-                listener<EntityUpdated>().call({id, req_state, res_state});
-                call<A>();
+                call<EntityUpdated>({id, req_state, res_state});
+                on_update<A>();
             }
         }
 
@@ -1148,6 +1158,12 @@ namespace NECS
             {
                 auto& i = info(id);
                 return i.state == DEAD;
+            }
+
+            bool is_state(EntityId id, EntityState state)
+            {
+                auto& i = info(id);
+                return i.state == state;
             }
 
             template <typename A>
@@ -1189,6 +1205,12 @@ namespace NECS
 
             auto info(EntityId id) -> const EntityInfo& 
             {
+                if (id >= total())
+                {
+                    std::cout << "Invalid EntityId: " << id;
+                    throw std::invalid_argument("Invalid EntityId");
+                }
+
                 return m_entities.data[id].info;
             }
             
@@ -1222,12 +1244,6 @@ namespace NECS
             auto singleton() -> S&
             {   
                 return std::get<S>(m_singletons);
-            }
-
-            template <typename E>
-            auto listener() -> Listener<E>&
-            {
-                return std::get<Listener<E>>(m_listeners);
             }
 
             template <typename Q>
@@ -1313,7 +1329,7 @@ namespace NECS
             }
             
             template <typename A>
-            auto create(A entity) -> EntityId
+            auto create(A entity, bool id_locked = false) -> EntityId
             {
                 Storage<A>& s = storage<A>();
 
@@ -1321,7 +1337,8 @@ namespace NECS
                 ({
                     std::type_index(typeid(A)), 
                     s.living.count(), 
-                    LIVE
+                    LIVE,
+                    id_locked
                 });
 
                 s.living.add(id, entity);
@@ -1351,8 +1368,8 @@ namespace NECS
     
                 if (run_callbacks) 
                 {
-                    listener<EntityCreated>().call({id});
-                    call<A>();
+                    call<EntityCreated>({id});
+                    on_update<A>();
                 }
 
                 return id;
@@ -1397,6 +1414,24 @@ namespace NECS
                 s.sleeping.trim();
             }
 
+            template <typename E, typename Callback>
+            void subscribe(Callback&& callback)
+            {
+                listener<E>().subscribe(callback);
+            }
+
+            template <typename E>
+            void unsubscribe()
+            {
+                listener<E>().unsubscribe();
+            }
+
+            template <typename E>
+            void call(E event)
+            {
+                listener<E>().call(event);
+            }
+
             void update()
             {
                 m_entities.update();
@@ -1406,7 +1441,7 @@ namespace NECS
             {
                 auto callback = [this, &id] (EntityState req_state, EntityState res_state) 
                 {
-                    if (run_callbacks) listener<EntityUpdated>().call({id, req_state, res_state});
+                    if (run_callbacks) call<EntityUpdated>({id, req_state, res_state});
                 };
 
                 m_entities.queue(id, task, callback);
