@@ -317,8 +317,6 @@ void InitSystem()
         {static_cast<float>(WINDOW_W), static_cast<float>(WINDOW_H)},
         {0, 0}
     });
-
-    registry.populate(Ball(), 0);
 }
 
 void InputSystem()
