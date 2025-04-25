@@ -188,23 +188,8 @@ void iterate()
     } 
 
     // Templated, pre-configured queries that iterate through the whole system
-    // A query MUST have a non-zero amount of storage chunks to iterate through 
-    auto& query = registry.query<PositionNameQuery>();
-
-    // 1. iterate entire system
-    for (auto [id, data] : query)
-    {
-        auto& [position, name] = data;
-
-        name.value = "New name";
-    }
-
-    // 2. change pool: sleeping_pool = true
-    query.update(true);
-
-    // 3. iterate over a portion of the query (here the second to last chunk)
-    size_t last = query.iter_count() - 1;
-    for (auto [id, data] : query.iter(last))
+    // It MUST have non-zero amount of storage chunks to iterate through 
+    for (auto [id, data] : registry.query<PositionNameQuery>())
     {
         auto& [position, name] = data;
 
