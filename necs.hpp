@@ -165,9 +165,6 @@ namespace NECS
     // // Entity
     // //==========================================================================  
 
-    template <typename... Cs> // Tuple alias for entities.
-    using Entity = std::tuple<Cs...>; 
-
     using EntityId = size_t; // Unique id for entities, used as its reference index.
     using EntityType = std::type_index; // An entity's archetype's type index.
     using EntityIndex = size_t; // The entity's location in its storage.
@@ -207,8 +204,8 @@ namespace NECS
             : type(_type) {}
 
         template <typename... Cs>
-        EntityRef(Entity<Cs&...> _data)
-            : data(_data), type(std::type_index(typeid(Entity<Cs...>))) {}
+        EntityRef(Data<Cs&...> _data)
+            : data(_data), type(std::type_index(typeid(Data<Cs...>))) {}
 
         template <typename A>
         bool is_type() 
@@ -216,7 +213,6 @@ namespace NECS
             return type == std::type_index(typeid(A));
         }
 
-        template <typename A>
         bool is_empty()
         {
             return data.has_value();
@@ -225,9 +221,9 @@ namespace NECS
         template <typename A>
         auto get()
         {
-            return [this]<typename... Cs>(Entity<Cs...>)
+            return [this]<typename... Cs>(Data<Cs...>)
             {   
-                return std::any_cast<Entity<Cs&...>>(data);
+                return std::any_cast<Data<Cs&...>>(data);
             }
             (A{});
         }
@@ -348,7 +344,7 @@ namespace NECS
     // //==========================================================================  
 
     template <typename... Cs> // Optional tuple alias.
-    using View = std::optional<Entity<Cs&...>>;
+    using View = std::optional<Data<Cs&...>>;
 
     // //==========================================================================
     // // Listener
@@ -425,6 +421,13 @@ namespace NECS
     using Listeners = std::invoke_result_t<decltype(InitListeners<As, Es>)>;
 
     // //==========================================================================
+    // // Extraction
+    // //==========================================================================  
+
+    template <typename... Cs> // Type returned by iterators and queries.
+    using Extraction = std::pair<EntityId, Data<Cs&...>>;
+
+    // //==========================================================================
     // // Iterator
     // //==========================================================================  
 
@@ -458,7 +461,7 @@ namespace NECS
             return v[current];
         }
     
-        auto extract_all() -> Entity<Cs&...>
+        auto extract_all() -> Data<Cs&...>
         {
             return std::tie<Cs...>(extract_one<Cs>()...);
         };
@@ -471,6 +474,11 @@ namespace NECS
             Iterator(Iterator<Cs...>&&) = default;
             Iterator<Cs...>& operator=(const Iterator<Cs...>&) = default;
             Iterator<Cs...>& operator=(Iterator<Cs...>&&) = default;
+
+            void reset()
+            {
+                current = 0;
+            }
 
             bool done()
             {
@@ -492,7 +500,7 @@ namespace NECS
                 return current == other.current;
             }
 
-            auto operator*() -> std::pair<EntityId, Entity<Cs&...>>
+            auto operator*() -> Extraction<Cs...>
             {
                 return {ids.get()[current], extract_all()};
             }
@@ -524,7 +532,7 @@ namespace NECS
     template <typename A>
     auto InitPoolData()
     {   
-        return []<typename... Cs>(Entity<Cs...>)
+        return []<typename... Cs>(Data<Cs...>)
         {
             return std::tuple<std::vector<Cs>...>{};
         }
@@ -587,7 +595,7 @@ namespace NECS
             }
 
             template <typename... Cs>
-            void add(EntityId id, Entity<Cs...> entity)
+            void add(EntityId id, Data<Cs...> entity)
             {
                 if (m_end == m_total)
                 {
@@ -606,7 +614,7 @@ namespace NECS
 
             void trim()
             {
-                [this]<typename... Cs>(Entity<Cs...>)
+                [this]<typename... Cs>(Data<Cs...>)
                 {
                     if (m_end < m_total)
                     {
@@ -624,7 +632,7 @@ namespace NECS
 
             auto get(EntityIndex index)
             {
-                return [this, &index]<typename... Cs>(Entity<Cs...>)
+                return [this, &index]<typename... Cs>(Data<Cs...>)
                 {
                     return get<Cs...>(index);
                 }
@@ -632,14 +640,14 @@ namespace NECS
             }
         
             template <typename... Cs>
-            auto get(EntityIndex index) -> Entity<Cs&...>
+            auto get(EntityIndex index) -> Data<Cs&...>
             {
                 return std::tie<Cs...>(vector<Cs>()[index]...);
             }
 
             auto clone(EntityIndex index)
             {
-                return [this, &index]<typename... Cs>(Entity<Cs...>)
+                return [this, &index]<typename... Cs>(Data<Cs...>)
                 {
                     return clone<Cs...>(index);
                 }
@@ -647,14 +655,14 @@ namespace NECS
             }    
 
             template <typename... Cs>
-            auto clone(EntityIndex index) -> Entity<Cs...>
+            auto clone(EntityIndex index) -> Data<Cs...>
             {
                 return get<Cs...>(index);
             }    
         
             auto remove(EntityIndex index) -> EntityId 
             {
-                [this, &index]<typename... Cs>(Entity<Cs...>)
+                [this, &index]<typename... Cs>(Data<Cs...>)
                 {
                     (swap<Cs>(index),...);
                     std::swap(m_ids[index], m_ids[m_end - 1]);
@@ -683,7 +691,7 @@ namespace NECS
         Pool<A> sleeping;
 
         template <typename... Cs>
-        auto get(EntityIndex index, bool sleeping_pool) -> Entity<Cs&...>
+        auto get(EntityIndex index, bool sleeping_pool) -> Data<Cs&...>
         {   
             auto& data = sleeping_pool ? sleeping : living;
             return data.template get<Cs...>(index);
@@ -762,116 +770,112 @@ namespace NECS
     template <typename... Cs> 
     using QueryData = std::vector<Iterator<Cs...>>;
 
-    /**
-     * User-defined iterator container.
-     * 
-     * init - runs only once in the Query's lifetime and populates the data with references.
-     * update - runs before every query is called and makes sure that empty iterators aren't considered.
-     */
-    template <typename... Cs> 
+    template <typename... Cs>
     class Query
     {
-        bool m_initialized = false; // Has the data been populated.
-
+        bool m_initialized = false;
         QueryData<Cs...> m_living;
         QueryData<Cs...> m_sleeping;
-
+        QueryData<Cs...>& m_data = m_living;
+        std::vector<size_t> m_valid;
+        size_t m_current = 0;
         size_t m_end = 0;
-        size_t m_current = 0; // current iterator, points to an iterator index in m_valid
-        QueryData<Cs...>& m_data = m_living; // iterators to consider on this run
 
-        public: 
-            template <typename... As>
-            void init(std::tuple<Storage<As>...>& storages)
-            {   
-                if (m_initialized) return; 
+    public:
+        bool initialized()
+        {
+            return m_initialized;
+        }
 
-                auto f = [this]<typename A>(Storage<A>& storage)
+        template <typename... As>
+        void init(std::tuple<Storage<As>...>& storages)
+        {   
+            if (m_initialized) return; 
+
+            auto f = [this]<typename A>(Storage<A>& storage)
+            {
+                if constexpr(Filter::has_all_types<A, Cs...>::value)
                 {
-                    if constexpr(Filter::has_all_types<A, Cs...>::value)
+                    m_living.push_back(storage.living.template iter<Cs...>());
+                    m_sleeping.push_back(storage.sleeping.template iter<Cs...>());
+                }
+            };
+
+            ((f(std::get<Storage<As>>(storages))),...);
+
+            m_initialized = true;
+        }
+
+        // makes sure that only non-empty iterators are considered, sets data pool
+        void update(bool sleeping_pool)
+        {
+            m_current = 0;
+            m_end = 0;
+            m_data = sleeping_pool ? m_sleeping : m_living;
+
+            int size = static_cast<int>(m_data.size());
+
+            for (int i = 0; i < size; i++)
+            {
+                Iterator<Cs...>& it = m_data[i];
+
+                it.reset();
+
+                if (!it.empty())
+                {
+                    if (m_end < m_valid.size())
                     {
-                        m_living.push_back(storage.living.template iter<Cs...>());
-                        m_sleeping.push_back(storage.sleeping.template iter<Cs...>());
+                        m_valid[m_end] = i;
                     }
-                };
-
-                ((f(std::get<Storage<As>>(storages))),...);
-            }
-
-            void update(bool sleeping_pool = false)
-            {
-                m_data = sleeping_pool ? m_sleeping : m_living;
-                m_end = m_data.size();
-
-                if (m_end == 0)
-                {
-                    std::cout << "!---ERROR at update (Query)---!" 
-                    << "\nThe size of query cannot be zero. Remove query from system."
-                    << "\nQuery type: " << typeid(Query<Cs...>).name() << "\n";
-                    throw std::invalid_argument("Query does not match any known archetypes.");
-                }
-
-                for (int i = static_cast<int>(m_end) - 1; i >= 0; i--)
-                {
-                    auto& iterator = m_data[i];
-
-                    if (iterator.empty())
+                    else 
                     {
-                        std::swap(m_data[i], m_data[m_end - 1]);
-                        m_end--;
+                        m_valid.push_back(i);
                     }
+
+                    m_end++;
                 }
             }
+        }
 
-            size_t iter_count()
+        bool operator!= (const Query<Cs...>& other) const 
+        {
+            return m_current != other.m_current;
+        }
+
+        auto operator*() -> Extraction<Cs...>
+        {
+            auto& iterator = m_data[m_valid[m_current]];
+
+            return *iterator;
+        }
+
+        Query<Cs...>& operator++() 
+        {
+            auto& iterator = m_data[m_valid[m_current]];
+
+            ++iterator;
+
+            if (iterator.done())
             {
-                return m_data.size();
+                m_current++;
             }
 
-            auto iter(size_t index) -> Iterator<Cs...>
-            {
-                return m_data[index];
-            }
+            return *this;
+        }
 
-            bool operator!= (const Query<Cs...>& other) const 
-            {
-                return m_current != other.m_current;
-            }
-    
-            auto operator*() -> std::pair<EntityId, Entity<Cs&...>>
-            {
-                auto& iterator = m_data[m_current];
+        Query<Cs...>& begin() 
+        {
+            m_current = 0;
 
-                return *iterator;
-            }
-    
-            Query<Cs...>& operator++() 
-            {
-                auto& iterator = m_data[m_current];
+            return *this;
+        }
 
-                ++iterator;
+        Query<Cs...>& end() 
+        {
+            m_current = m_end;
 
-                if (iterator.done())
-                {
-                    m_current++;
-                }
-
-                return *this;
-            }
-    
-            Query<Cs...>& begin() 
-            {
-                m_current = 0;
-
-                return *this;
-            }
-
-            Query<Cs...>& end() 
-            {
-                m_current = m_end;
-
-                return *this;
-            }
+            return *this;
+        }    
     };
 
     // //==========================================================================
@@ -918,7 +922,7 @@ namespace NECS
         template <typename A>
         auto view_entity(EntityId id)
         {
-            return [this, &id]<typename... Cs>(Entity<Cs...>)
+            return [this, &id]<typename... Cs>(Data<Cs...>)
             {
                 return view_components<A, Cs...>(id);
             }
@@ -994,7 +998,7 @@ namespace NECS
                 }
             };
 
-            [this, &f]<typename... Cs>(Entity<Cs&...> entity)
+            [this, &f]<typename... Cs>(Data<Cs&...> entity)
             {
                 (f(std::get<Cs&>(entity)),...);
             }
@@ -1070,7 +1074,7 @@ namespace NECS
         {
             listener<DataUpdated<A>>().call({});
 
-            [this]<typename... Cs>(Entity<Cs...>)
+            [this]<typename... Cs>(Data<Cs...>)
             {
                 ((listener<DataUpdated<Cs>>().call({})),...);
             }
@@ -1136,7 +1140,14 @@ namespace NECS
             template <typename A>
             bool is_type(EntityId id) 
             {
-                return info(id).type == std::type_index(typeid(A));
+                auto& i = info(id);
+                return i.type == std::type_index(typeid(A));
+            }
+
+            bool is_dead(EntityId id)
+            {
+                auto& i = info(id);
+                return i.state == DEAD;
             }
 
             template <typename A>
@@ -1224,7 +1235,11 @@ namespace NECS
             {
                 auto& q = std::get<Q>(m_queries);
                 
-                q.init(m_storages);
+                if (!q.initialized())
+                {
+                    q.init(m_storages);
+                }
+
                 q.update(sleeping_pool);
 
                 return q;
@@ -1244,7 +1259,7 @@ namespace NECS
             }
 
             template <typename A, typename... Cs>
-            auto get(EntityId id) -> Entity<Cs&...>
+            auto get(EntityId id) -> Data<Cs&...>
             {
                 auto& i = info(id);
 
@@ -1315,7 +1330,7 @@ namespace NECS
 
                 data.ref = [this, id] ()
                 {
-                    return [this, &id]<typename... Cs>(Entity<Cs...>)
+                    return [this, &id]<typename... Cs>(Data<Cs...>)
                     {
                         auto& i = info(id);
 
@@ -1325,7 +1340,7 @@ namespace NECS
                         }
                         else 
                         {
-                            Entity<Cs&...> e = storage<A>().template get<Cs...>
+                            Data<Cs&...> e = storage<A>().template get<Cs...>
                             (i.index, (i.state == SLEEPING || i.state == AWAKE));
 
                             return EntityRef(e);
@@ -1355,7 +1370,7 @@ namespace NECS
             template <typename... Cs, typename Callback>
             void for_each(Callback&& callback, bool sleeping_pool = false)
             {
-                static_assert(std::is_invocable_v<Callback, EntityId, Entity<Cs&...>>, "For each callback must take EntityId, Entity<Cs&...> as argument.");
+                static_assert(std::is_invocable_v<Callback, EntityId, Data<Cs&...>>, "For each callback must take EntityId, Entity<Cs&...> as argument.");
 
                 [this, &callback, &sleeping_pool]<typename... As>(std::tuple<As...>)
                 {
