@@ -308,10 +308,8 @@ void InitSystem()
         }
     };
 
-    auto& listener = registry.listener<SpawnBalls>();
-
-    listener.subscribe(spawn_balls);
-    listener.call
+    registry.subscribe<SpawnBalls>(spawn_balls);
+    registry.call<SpawnBalls>
     ({
         GetRandomValue(10, 20),
         {static_cast<float>(WINDOW_W), static_cast<float>(WINDOW_H)},
@@ -341,7 +339,7 @@ void InputSystem()
             static_cast<float>(GetRandomValue(y - f, y))
         };
 
-        registry.listener<SpawnBalls>().call
+        registry.call<SpawnBalls>
         ({
             GetRandomValue(1, 3),
             max,
