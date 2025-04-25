@@ -1,6 +1,6 @@
 # Overview
 
-**NECS** (Nano ECS) is a single-header Entity-Component-System (ECS) library being developed for C++20. It is designed to be simple and easy to use, with a focus on cache friendliness.
+**NECS** (Nano ECS) is a single-header Entity-Component-System (ECS) library being developed for C++20. It is designed to be simple, small and easy to use.
 
 ## In this repo
 
@@ -396,28 +396,8 @@ int main ()
     InitAudioDevice();
     InitSystem();
 
-    int counter = 0;
-
     while (WindowShouldClose() == false)
     {   
-        if (counter > 1000)
-        {
-            auto count = registry.pool_count<Ball>();
-            
-            if (count > 0)
-            {
-                EntityId id = GetRandomValue(0, registry.pool_count<Ball>());
-                registry.queue(id, KILL);
-                registry.update();
-            }
-            counter = 0;
-
-        }
-        else 
-        {
-            counter++;
-        }
-
         InputSystem();
         MoveSystem();
         DrawSystem();
