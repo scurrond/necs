@@ -205,3 +205,227 @@ void iterate()
     });
 }
 ```
+
+# Bouncing balls example (using raylib)
+```cpp
+#include "include/raylib.h"
+#include "include/necs.hpp"
+#include <cmath>
+
+using namespace NECS;
+
+const int WINDOW_W = 800;
+const int WINDOW_H = 800;
+const float BALL_SPEED = 300;
+const float BALL_RADIUS = 10;
+
+// COMPONENTS
+
+struct Position 
+{
+    float x;
+    float y;
+};
+struct Direction 
+{
+    float x;
+    float y;
+};
+
+// ARCHETYPES
+using Ball = Data<Color, Position, Direction>;
+
+// EVENTS
+struct SpawnBalls
+{
+    int amount;
+    Vector2 bounds_max;
+    Vector2 bounds_min;
+};
+
+// QUERIES
+using DrawQuery = Query<Position, Color>;
+using MoveQuery = Query<Position, Direction>;
+
+// REGISTRY DATA
+
+using Archetypes = Data<Ball>;
+using Events = Data<SpawnBalls>;
+using Singletons = Data<>;
+using Queries = Data<DrawQuery, MoveQuery>;
+
+Registry<Archetypes, Events, Singletons, Queries> registry;
+
+auto ran_char(int min, int max)
+{
+    return static_cast<unsigned char>(GetRandomValue(min, max));
+}
+
+auto ran_float(float min, int max)
+{
+    return static_cast<float>(GetRandomValue(static_cast<int>(min), static_cast<int>(max)));
+}
+
+auto normalize(float& x, float& y)
+{
+    if (x != 0 && y != 0)
+    {
+        auto mag = sqrt(pow(x, 2) + pow(y, 2));
+        
+        x = x / mag;
+        y = y / mag;
+    }
+}
+
+void InitSystem()
+{
+    auto spawn_balls = [](SpawnBalls event)
+    {
+        auto [amount, bounds_max, bounds_min] = event;
+
+        for (int i = 0; i < amount; i++)
+        {
+            Color col = 
+            {
+                ran_char(0, 255), 
+                ran_char(0, 255), 
+                ran_char(0, 255),  
+                255
+            };
+            Position pos = 
+            {
+                ran_float(bounds_min.x, bounds_max.x),
+                ran_float(bounds_min.y, bounds_max.y)
+            };
+            Direction dir = 
+            {
+                ran_float(-100, 100),
+                ran_float(-100, 100)
+            };
+            normalize(dir.x, dir.y);
+
+            registry.create(Ball{col, pos, dir});
+        }
+    };
+
+    auto& listener = registry.listener<SpawnBalls>();
+
+    listener.subscribe(spawn_balls);
+    listener.call
+    ({
+        GetRandomValue(10, 20),
+        {static_cast<float>(WINDOW_W), static_cast<float>(WINDOW_H)},
+        {0, 0}
+    });
+
+    registry.populate(Ball(), 0);
+}
+
+void InputSystem()
+{
+    auto target = GetMousePosition();
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
+        int f = 5;
+        int x = static_cast<int>(target.x);
+        int y = static_cast<int>(target.y);
+
+        Vector2 max = 
+        {
+            static_cast<float>(GetRandomValue(x, y + f)), 
+            static_cast<float>(GetRandomValue(y, y + f))
+        };
+
+        Vector2 min = 
+        {
+            static_cast<float>(GetRandomValue(x - f, x)), 
+            static_cast<float>(GetRandomValue(y - f, y))
+        };
+
+        registry.listener<SpawnBalls>().call
+        ({
+            GetRandomValue(1, 3),
+            max,
+            min
+        });
+    }
+}
+
+void MoveSystem()
+{
+    auto delta = GetFrameTime();
+
+    for (auto [id, data] : registry.query<MoveQuery>())
+    {
+        auto& [pos, dir] = data;
+
+        pos.x += dir.x * BALL_SPEED * delta;
+        pos.y += dir.y * BALL_SPEED * delta;
+
+        if (abs(pos.x) > WINDOW_W || pos.x < 0 )
+        {       
+            dir.x = dir.x * -1;
+        }
+        if (abs(pos.y) > WINDOW_H || pos.y < 0 )
+        {       
+            dir.y = dir.y * -1;
+        }
+    }
+}
+
+void DrawSystem()
+{
+    BeginDrawing();
+
+    ClearBackground(RAYWHITE);
+
+    for (auto [id, data] : registry.query<DrawQuery>())
+    {
+        auto& [pos, col] = data;
+
+        DrawCircle(pos.x, pos.y, BALL_RADIUS, col);
+    } 
+
+    DrawText(TextFormat("Running at: %i FPS, Ball count %i", GetFPS(), registry.pool_count<Ball>()), 190, 200, 20, LIGHTGRAY);
+
+    EndDrawing();
+}
+    
+int main () 
+{
+    InitWindow(WINDOW_W, WINDOW_H, "Balls");
+    InitAudioDevice();
+    InitSystem();
+
+    int counter = 0;
+
+    while (WindowShouldClose() == false)
+    {   
+        if (counter > 1000)
+        {
+            auto count = registry.pool_count<Ball>();
+            
+            if (count > 0)
+            {
+                EntityId id = GetRandomValue(0, registry.pool_count<Ball>());
+                registry.queue(id, KILL);
+                registry.update();
+            }
+            counter = 0;
+
+        }
+        else 
+        {
+            counter++;
+        }
+
+        InputSystem();
+        MoveSystem();
+        DrawSystem();
+    }   
+
+    CloseAudioDevice();
+    CloseWindow();
+}
+```
