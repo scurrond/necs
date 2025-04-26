@@ -8,7 +8,7 @@ void test_subscribe()
     ([](EntityCreated event){
         auto& info = reg.info(event.id);
 
-        std::cout << "\n------------------------------------------------\n";
+        std::cout << "------------------------------------------------\n";
         std::cout << "Created entity:" 
         << "\n Id: " << event.id 
         << "\n Type: " << info.type.name()
@@ -19,6 +19,8 @@ void test_subscribe()
         {
             throw std::runtime_error("Incorrect entity state in entity metadata.");
         }
+
+        std::cout << "\n------------------------------------------------\n";
     });
 }
 
@@ -80,6 +82,8 @@ void test_create()
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
 
+    std::cout << "\n------------------------------------------------\n";
+
     std::cout << "Components:";
 
     auto [name] = test_view<A4, Name>(id);
@@ -106,8 +110,10 @@ void test_populate()
 
 int main()
 {
+    std::cout << "=== Running tests ===\n";
     test_subscribe();
     test_create();
+    std::cout << "=== Run succeeded ===\n";
 
     return 0;
 }
