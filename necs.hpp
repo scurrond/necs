@@ -1595,7 +1595,7 @@ namespace NECS
                 {
                     bool found = false;
 
-                    auto f = [this, &v, &id, &found]<typename A>(Storage<A>& s)
+                    auto f = [this, &v, &id, &found]<typename A>(Storage<A>&)
                     {
                         if (found) return;
 
