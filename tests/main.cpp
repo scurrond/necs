@@ -8,7 +8,7 @@ void test_subscribe()
     ([](EntityCreated event){
         auto& info = reg.info(event.id);
 
-        std::cout << "------------------------------------------------\n";
+        std::cout << "\n------------------------------------------------\n";
         std::cout << "Created entity:" 
         << "\n Id: " << event.id 
         << "\n Type: " << info.type.name()
@@ -82,7 +82,7 @@ void test_create()
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
 
-    std::cout << "\n------------------------------------------------\n";
+    std::cout << "------------------------------------------------\n";
 
     std::cout << "Components:";
 
