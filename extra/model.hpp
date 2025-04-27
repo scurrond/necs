@@ -1,6 +1,6 @@
 #pragma once 
 
-#include "necs.hpp"
+#include "../necs.hpp"
 
 using namespace NECS;
 

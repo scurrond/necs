@@ -2,14 +2,6 @@
 
 Registry<Archetypes, Events, Singletons, Queries> reg;
 
-void test_match()
-{
-    QueryData<For<Health>> data; 
-    using Indices = std::make_index_sequence<std::tuple_size_v<Archetypes>>;
-
-    using Match = Filter::match_index<Archetypes, Indices, Data<Health>, Data<Name>>::type;
-}
-
 void test_subscribe()
 {
     reg.subscribe<EntityCreated>
