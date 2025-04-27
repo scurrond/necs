@@ -2,32 +2,32 @@
 
 **NECS** (Nano ECS) is a single-header Entity-Component-System (ECS) library being developed for C++20. It is designed to be simple, small and easy to use.
 
-## In this repo
+# Contents
 
-### Benchmarks
+## extra/benchmarks
 
 Benchmark setup & build file + some result files. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
 
-All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, run around a 1000 times and then have averages calculated for them.
+All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them.
 
 Build currently only available for windows, prints results to console. Need to eventually switch to a professional benchmarking setup.
 
 NOTE:
 Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
 
-### Tests
+## extra/tests
 
 Test setup & build file. Not finished. 
 
-### model.hpp
+## extra/examples
 
-Data model for testing and benchmarking.
+Example files of different setups. Not finished.
 
-### encs.hpp
+## encs.hpp
 
 Library header file.
 
-## Foreword
+# Foreword
 
 Hello & thank you for checking out my repo! Let me know about any concerns or bugs regarding my code, I appreaciate any feedback and criticism you have.
 
@@ -37,7 +37,7 @@ The workflow that NECS supports relies heavily on knowing exactly what the struc
 
 Currently, NECS supports smaller projects and single-threaded use only. Read: I haven't tested it enough yet.
 
-## Features
+# Features
 - The library is a single header and can be dropped into any project.
 - It uses the standard library only.
 - Entity data is structured inside tuples and vectors, using an SoA approach & allowing for fast queries. This also allows for compile-time filtering with some template magic.
