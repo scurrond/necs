@@ -35,8 +35,8 @@ using Singletons = Data<S1, S2, S3>;
 
 // QUERIES
 
-using SingleQuery = Query<Health>;
-using DoubleQuery = Query<Health, Position>;
-using TripleQuery = Query<Health, Position, Name>;
+using SingleQuery = Query<For<Health>>;
+using DoubleQuery = Query<For<Health, Position>>;
+using TripleQuery = Query<For<Health, Position, Name>>;
 
 using Queries = Data<SingleQuery, DoubleQuery, TripleQuery>;

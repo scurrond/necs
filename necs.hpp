@@ -91,13 +91,16 @@ namespace NECS
         struct has_type<T, std::tuple<Head, Tail...>>
             : std::conditional_t
             <
-                std::is_same_v<Head, T>, 
-                std::true_type, has_type<T, 
-                std::tuple<Tail...>>
+                std::is_same_v<T, Head>, 
+                std::true_type, 
+                has_type<T, std::tuple<Tail...>>
             > {};
 
         template<typename T, typename... Ts>
         struct has_all_types : std::conjunction<has_type<Ts, T>...> {};
+
+        template<typename T, typename... Ts>
+        struct has_any_type : std::disjunction<has_type<Ts, T>...> {};
 
         template <std::size_t I, typename Seq>
         struct concat_index;
@@ -135,6 +138,50 @@ namespace NECS
             using type = std::index_sequence<>;
         };
 
+        template <typename Tuple, typename Seq, typename With, typename Without>
+        struct match_index;
+
+        template <
+            typename Tuple, 
+            std::size_t I, 
+            std::size_t... Is, 
+            typename... WithTs, 
+            typename... WithoutTs>
+        struct match_index
+        <
+            Tuple, std::index_sequence<I, Is...>, 
+            std::tuple<WithTs...>, 
+            std::tuple<WithoutTs...>
+        > 
+        {
+            using Tail = typename match_index
+            <
+                Tuple, 
+                std::index_sequence<Is...>, 
+                std::tuple<WithTs...>, 
+                std::tuple<WithoutTs...>
+            >::type;
+
+            using CurrentTuple = std::tuple_element_t<I, Tuple>;
+
+            static constexpr bool match =
+                has_all_types<CurrentTuple, WithTs...>::value &&
+                !has_any_type<CurrentTuple, WithoutTs...>::value;
+
+            using type = std::conditional_t
+            <
+                match,
+                typename Filter::concat_index<I, Tail>::type,
+                Tail
+            >;
+        };
+
+        template <typename Tuple, typename With, typename Without>
+        struct match_index<Tuple, std::index_sequence<>, With, Without> {
+            using type = std::index_sequence<>;
+        };
+
+
         template <typename Tuple, typename... Ts>
         constexpr auto Indices() 
         {
@@ -146,6 +193,9 @@ namespace NECS
             }
             (typename filter_index<Tuple, Indices, Ts...>::type{});
         }
+
+        template <typename Tuple, typename With = std::tuple<>, typename Without = std::tuple<>>
+        using Match = match_index<Tuple, std::make_index_sequence<std::tuple_size_v<Tuple>>, With, Without>::type;
     };
     
     // ----------------------------------------------------------------------------
@@ -910,8 +960,33 @@ namespace NECS
     // Query
     // ---------------------------------------------------------------------------- 
 
-    template <typename... Cs> 
-    using QueryData = std::vector<Iterator<Cs...>>;
+    // Struct for wrapping query components to return during queries.
+    template <typename... Cs>
+    struct For {};
+
+    // Struct for wrapping query components to check for during queries.
+    // Repeating the same types as in For is undefined behavior.
+    template <typename... Cs>
+    struct With {};
+
+    // Struct for wrapping query components to exclude during queries.
+    // This filters for archetypes that do not have to components in the template.
+    // Repeating the same types as in For is undefined behavior.
+    template <typename... Cs>
+    struct Without {};
+
+    template <typename ForP>
+    auto InitQueryData()
+    {
+        return []<typename... Cs>(For<Cs...>)
+        {
+            return std::vector<Iterator<Cs...>>{};
+        }
+        (ForP{});
+    };
+
+    template <typename ForP> 
+    using QueryData = std::invoke_result_t<decltype(InitQueryData<ForP>)>;
 
     /**
      * A pre-configured class containing references to all the component vectors in 
@@ -924,16 +999,24 @@ namespace NECS
      * The references to component vectors will exist for the entire duration of 
      * the program, so they are safe to keep. 
      * 
+     * @tparam Cs The components to iterate through.
+     * 
+     * 
      * TODO: Include a way of generating fresh queries on the fly.
      * TODO: Include With and Without filters.
      */
-    template <typename... Cs>
+    template 
+    <
+        typename ForP = For<>, 
+        typename WithP = With<>, 
+        typename WithoutP = Without<>
+    >
     class Query
     {
-        QueryData<Cs...> m_living;
-        QueryData<Cs...> m_sleeping;
+        QueryData<ForP> m_living;
+        QueryData<ForP> m_sleeping;
         size_t m_current = 0;
-        std::reference_wrapper<QueryData<Cs...>> m_data = m_living;
+        std::reference_wrapper<QueryData<ForP>> m_data = m_living;
 
         void advance()
         {
@@ -941,7 +1024,7 @@ namespace NECS
 
             while (m_current < m_data.get().size())
             {
-                Iterator<Cs...>& iterator = m_data.get()[m_current];
+                auto& iterator = m_data.get()[m_current];
                 iterator.reset();    
                 
                 if (iterator.empty())
@@ -955,39 +1038,53 @@ namespace NECS
             }
         }
 
+        template <typename... Cs>
+        auto chunk(size_t index, For<Cs...>) -> Iterator<Cs...>&
+        {
+            return m_data.get()[index];
+        }
+
     public:
         Query() {}
 
         /**
          * Populates the query with storages that match the filter. 
          * 
-         * @tparam As... All the archetypes in the system. 
+         * @tparam As... All the matching archetypes in the system. 
          * 
-         * @param storages All the storages in the system.
+         * @param storages All the matched storages in the system.
          * 
          * @throws Query data is empty. At least 1 storage must match the filter, else the
          * query is redundant and should be removed.
          */
         template <typename... As>
-        Query(std::tuple<Storage<As>...>& storages) 
+        Query(Data<Storage<As>&...> storages) 
         {
-            auto f = [this]<typename A>(Storage<A>& storage)
+            auto f = [this]<typename A, typename... Cs>(Storage<A>& storage, For<Cs...>)
             {
-                if constexpr(Filter::has_all_types<A, Cs...>::value)
-                {
-                    m_living.push_back(storage.living.template iter<Cs...>());
-                    m_sleeping.push_back(storage.sleeping.template iter<Cs...>());
-                }
+                m_living.push_back(storage.living.template iter<Cs...>());
+                m_sleeping.push_back(storage.sleeping.template iter<Cs...>());
             };
 
-            ((f(std::get<Storage<As>>(storages))),...);
+            ((f(std::get<Storage<As>&>(storages), ForP{})),...);
 
             if (m_living.size() == 0 || m_sleeping.size() == 0) 
             {
-                throw std::runtime_error("@ Query::init: query data cannot be empty. At least 1 storage must match the filter.");
+                throw std::runtime_error
+                ("@ Query::init: query data cannot be empty, the query is redundant. At least 1 storage must match the filter.");
             }
 
             m_data = m_living;
+        }
+
+        size_t iter_count()
+        {
+            return m_data.get().size();
+        }
+
+        auto& iter(size_t index) 
+        {
+            return chunk(index, ForP{});
         }
  
         // Sets pool to living (false) : sleeping (true)
@@ -997,21 +1094,21 @@ namespace NECS
             m_data = sleeping_pool ? m_sleeping : m_living;
         }
 
-        bool operator!= (const Query<Cs...>& other) const 
+        bool operator!= (const Query<ForP, WithP, WithoutP>& other) const 
         {
             return m_current != other.m_current;
         }
 
-        auto operator*() -> Extraction<Cs...>
+        auto operator*()
         {
-            auto& iterator = m_data.get()[m_current];
+            auto& iterator = iter(m_current);
 
             return *iterator;
         }
 
-        Query<Cs...>& operator++() 
+        Query<ForP, WithP, WithoutP>& operator++() 
         {
-            Iterator<Cs...>& iterator = m_data.get()[m_current];
+            auto& iterator = iter(m_current);
 
             ++iterator;
 
@@ -1020,11 +1117,11 @@ namespace NECS
             return *this;
         }
 
-        Query<Cs...>& begin() 
+        Query<ForP, WithP, WithoutP>& begin() 
         {
             m_current = 0;
 
-            Iterator<Cs...>& iterator = m_data.get()[m_current];
+            auto& iterator = iter(m_current);
 
             iterator.reset();
 
@@ -1033,7 +1130,7 @@ namespace NECS
             return *this;
         }
 
-        Query<Cs...>& end() 
+        Query<ForP, WithP, WithoutP>& end() 
         {
             m_current = m_data.get().size();
 
@@ -1307,18 +1404,30 @@ namespace NECS
             }
         }
 
+        template <typename Wis = Data<>, typename Wos = Data<>>
+        auto match()
+        {
+            return [this] <size_t... Is>(std::index_sequence<Is...>)
+            {
+                return std::tie(std::get<Is>(m_storages)...);
+            }
+            (Filter::Match<Archetypes, Wis, Wos>{});
+        }
+
         public:
             Registry()
             {
                 [this] <typename... Qs>(Data<Qs...>& qs)
                 {
-                    auto init_query = [this]<typename... Cs>(Query<Cs...>& q)
+                    auto f = [this]
+                    <typename... Cs, typename... Ws, typename... Wos>
+                    (Query<For<Cs...>, With<Ws...>, Without<Wos...>>& q)
                     {
-                        q = Query<Cs...>(m_storages);
+                        auto storages = match<Data<Cs..., Ws...>, Data<Wos...>>();
+                        q = Query<For<Cs...>, With<Ws...>, Without<Wos...>>(storages);
                     };
 
-                    (init_query(std::get<Qs>(qs)),...);
-
+                    (f(std::get<Qs>(qs)),...);
                 }
                 (m_queries);
             }
@@ -1480,30 +1589,6 @@ namespace NECS
             }
 
             /**
-             * Filters for components in all the archetypes.
-             * 
-             * @tparam Cs... The components to filter for.
-             * 
-             * @returns A tuple of archetypes that contain all the components. 
-             * 
-             * TODO: make private and extract storages rather than constructing types.
-             */
-            template <typename... Cs>
-            auto filter()
-            {
-                auto f = [] <typename... As>(std::tuple<Storage<As>&...>)
-                {
-                    return std::tuple<As...>{};
-                };
-
-                return [this, &f] <size_t... Is>(std::index_sequence<Is...>)
-                {
-                    return f(std::tie(std::get<Is>(m_storages)...));
-                }
-                (Filter::Indices<Archetypes, Cs...>());
-            }
-
-            /**
              * Gets a singleton.
              * 
              * @tparam S The singleton's type.
@@ -1612,27 +1697,30 @@ namespace NECS
             {
                 View<Cs...> v;
 
-                [this, &v, &id]<typename... As>(std::tuple<As...>)
+                [this, &v, &id]<typename... As>(Data<Storage<As>&...> storages)
                 {
                     bool found = false;
 
-                    auto f = [this, &v, &id, &found]<typename A>(Storage<A>&)
+                    auto f = [this, &v, &id, &found]<typename A>(Storage<A>& s)
                     {
                         if (found) return;
 
                         if (is_type<A>(id))
                         {
                             found = true;
-                            
-                            if constexpr (Filter::has_all_types<A, Cs...>::value == true)
+
+                            auto& i = info(id);
+
+                            if (i.state != DEAD)
                             {
-                                v = view<A, Cs...>(id);
+                                v = s.template get<Cs...>(i.index, (i.state == SLEEPING || i.state == AWAKE));
                             }
                         }
                     };  
-                    ((f(std::get<Storage<As>>(m_storages))),...);
+
+                    ((f(std::get<Storage<As>&>(storages))),...);
                 }
-                (filter<Cs...>());
+                (match<Data<Cs...>>());
 
                 return v;
             }
@@ -1751,7 +1839,7 @@ namespace NECS
             {
                 static_assert(std::is_invocable_v<Callback, EntityId, Data<Cs&...>>, "For each callback must take EntityId, Entity<Cs&...> as argument.");
 
-                [this, &callback, &sleeping_pool]<typename... As>(std::tuple<As...>)
+                [this, &callback, &sleeping_pool]<typename... As>(Data<Storage<As>&...> storages)
                 {
                     auto f = [this, &callback, &sleeping_pool]<typename A>(Storage<A>& s)
                     {
@@ -1763,9 +1851,9 @@ namespace NECS
                         }
                     };
 
-                    (f(storage<As>()),...);
+                    (f(std::get<Storage<As>&>(storages)),...);
                 }
-                (filter<Cs...>());
+                (match<Data<Cs...>>());
             }
            
             // Trims dead memory from the end of each pool.
