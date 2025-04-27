@@ -4,28 +4,36 @@
 
 # Contents
 
-## extra/benchmarks
+## - encs.hpp
+Library header file.
 
-Benchmark setup & build file + some result files. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
+## - extra
+Tests, benchmarks and example files. 
 
-All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them.
+### -- model.hpp
+Data models for testing and benchmarking.
 
-Build currently only available for windows, prints results to console. Need to eventually switch to a professional benchmarking setup.
+### -- benchmarks
 
-NOTE:
+#### --- main.cpp 
+Main benchmarking setup. All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
+
+#### --- build.bat
+Build file for benchmarks. Currently only available for windows. You must include an entity count as a console argument when running it.
+
+#### --- results 
+Result text files for different operations per entity count. 
+
+NOTE: 
 Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
 
-## extra/tests
+### -- tests
 
 Test setup & build file. Not finished. 
 
-## extra/examples
+### -- examples
 
 Example files of different setups. Not finished.
-
-## encs.hpp
-
-Library header file.
 
 # Foreword
 
