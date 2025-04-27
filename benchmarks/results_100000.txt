@@ -1,0 +1,142 @@
+=== Running benchmarks for: 100000 entities ===
+------------------------------------------------
+Create 3 components:
+ - Average duration: 11269000ns
+ - Average per entity: 112.69ns
+ - Iterations: 1
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+For each name:
+ - Average duration: 572529ns
+ - Average per entity: 5.72529ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+For each name & pos:
+ - Average duration: 583553ns
+ - Average per entity: 5.83553ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+For each name, pos & health:
+ - Average duration: 609692ns
+ - Average per entity: 6.09692ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+1-component query
+ - Average duration: 205745ns
+ - Average per entity: 2.05745ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+2-component query:
+ - Average duration: 226525ns
+ - Average per entity: 2.26525ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+3-component query:
+ - Average duration: 710637ns
+ - Average per entity: 7.10637ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+1-component iter:
+ - Average duration: 25888ns
+ - Average per entity: 0.25888ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+2-component iter:
+ - Average duration: 51470ns
+ - Average per entity: 0.5147ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+3-component iter:
+ - Average duration: 606610ns
+ - Average per entity: 6.0661ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+1-component get:
+ - Average duration: 541046ns
+ - Average per entity: 5.41046ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+2-component get:
+ - Average duration: 792462ns
+ - Average per entity: 7.92462ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+3-component get:
+ - Average duration: 1251261ns
+ - Average per entity: 12.5126ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+1-component view:
+ - Average duration: 559194ns
+ - Average per entity: 5.59194ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+2-component view:
+ - Average duration: 652579ns
+ - Average per entity: 6.52579ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+3-component view:
+ - Average duration: 1104033ns
+ - Average per entity: 11.0403ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+1-component find:
+ - Average duration: 1375389ns
+ - Average per entity: 13.7539ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+2-component find:
+ - Average duration: 1093085ns
+ - Average per entity: 10.9309ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+3-component find:
+ - Average duration: 1332606ns
+ - Average per entity: 13.3261ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+------------------------------------------------
+Ref:
+ - Average duration: 7159695ns
+ - Average per entity: 71.5969ns
+ - Iterations: 1000
+ - Entities: 100000
+------------------------------------------------
+=== Benchmarks succeeded ===
