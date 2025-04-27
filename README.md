@@ -2,40 +2,29 @@
 
 **NECS** (Nano ECS) is a single-header Entity-Component-System (ECS) library being developed for C++20. It is designed to be simple, small and easy to use.
 
-# Contents
+## Contents
 
-## - encs.hpp
+### encs.hpp
 Library header file.
 
-## - extra
-Tests, benchmarks and example files. 
-
-### -- model.hpp
+### extra/model.hpp
 Data models for testing and benchmarking.
 
-### -- benchmarks
-
-#### --- main.cpp 
-Main benchmarking setup. All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
-
-#### --- build.bat
-Build file for benchmarks. Currently only available for windows. You must include an entity count as a console argument when running it.
-
-#### --- results 
-Result text files for different operations per entity count. 
+### extra/benchmarks
+- Main benchmarking setup. All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
+- Build file for benchmarks. Currently only available for windows. You must include an entity count as a console argument when running it.
+- Result text files for different operations per entity count. 
 
 NOTE: 
 Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
 
-### -- tests
-
+### extra/tests
 Test setup & build file. Not finished. 
 
-### -- examples
-
+### extra/examples
 Example files of different setups. Not finished.
 
-# Foreword
+## Foreword
 
 Hello & thank you for checking out my repo! Let me know about any concerns or bugs regarding my code, I appreaciate any feedback and criticism you have.
 
@@ -45,7 +34,7 @@ The workflow that NECS supports relies heavily on knowing exactly what the struc
 
 Currently, NECS supports smaller projects and single-threaded use only. Read: I haven't tested it enough yet.
 
-# Features
+## Features
 - The library is a single header and can be dropped into any project.
 - It uses the standard library only.
 - Entity data is structured inside tuples and vectors, using an SoA approach & allowing for fast queries. This also allows for compile-time filtering with some template magic.
