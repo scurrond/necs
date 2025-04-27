@@ -14,13 +14,9 @@ struct Name { std::string value; };
 
 using A1 = Data<Health>;
 using A2 = Data<Health, Position>;
-using A3 = Data<Health, Name>;
-using A4 = Data<Health, Position, Name>;
-using A5 = Data<Position>;
-using A6 = Data<Position, Name>;
-using A7 = Data<Name>;
+using A3 = Data<Health, Position, Name>;
 
-using Archetypes = Data<A1, A2, A3, A4, A5, A6, A7>;
+using Archetypes = Data<A1, A2, A3>;
 
 // EVENTS
 

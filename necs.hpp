@@ -917,33 +917,60 @@ namespace NECS
      * A pre-configured class containing references to all the component vectors in 
      * the system that match the template filter. These are stored in iterators.
      * 
+     * Queries are meant to be chunk iterators and can return an iterator 
+     * corresponding to a single pool at a time. They can be used to spread
+     * iterations across multiple threads or for a flattened for each loop.
+     * 
+     * The references to component vectors will exist for the entire duration of 
+     * the program, so they are safe to keep. 
+     * 
+     * TODO: Include a way of generating fresh queries on the fly.
      * TODO: Include With and Without filters.
      */
     template <typename... Cs>
     class Query
     {
-        bool m_initialized = false;
         QueryData<Cs...> m_living;
         QueryData<Cs...> m_sleeping;
-        QueryData<Cs...>& m_data = m_living;
-        std::vector<size_t> m_valid;
         size_t m_current = 0;
-        size_t m_end = 0;
+        std::reference_wrapper<QueryData<Cs...>> m_data = m_living;
 
-    public:
-        bool initialized()
+        void advance()
         {
-            return m_initialized;
+            m_current++;
+
+            while (m_current < m_data.get().size())
+            {
+                Iterator<Cs...>& iterator = m_data.get()[m_current];
+                iterator.reset();    
+                
+                if (iterator.empty())
+                {
+                    m_current++;
+                }
+                else 
+                {
+                    return;
+                }
+            }
         }
 
-        // Called the first time a query is called. 
-        // TODO: replace with constructor and call from registry constructor
-        // TODO: throw if query data is empty.
-        template <typename... As>
-        void init(std::tuple<Storage<As>...>& storages)
-        {   
-            if (m_initialized) return; 
+    public:
+        Query() {}
 
+        /**
+         * Populates the query with storages that match the filter. 
+         * 
+         * @tparam As... All the archetypes in the system. 
+         * 
+         * @param storages All the storages in the system.
+         * 
+         * @throws Query data is empty. At least 1 storage must match the filter, else the
+         * query is redundant and should be removed.
+         */
+        template <typename... As>
+        Query(std::tuple<Storage<As>...>& storages) 
+        {
             auto f = [this]<typename A>(Storage<A>& storage)
             {
                 if constexpr(Filter::has_all_types<A, Cs...>::value)
@@ -955,38 +982,19 @@ namespace NECS
 
             ((f(std::get<Storage<As>>(storages))),...);
 
-            m_initialized = true;
-        }
+            if (m_living.size() == 0 || m_sleeping.size() == 0) 
+            {
+                throw std::runtime_error("@ Query::init: query data cannot be empty. At least 1 storage must match the filter.");
+            }
 
-        // Makes sure that only non-empty iterators are considered, sets data pool.
-        void update(bool sleeping_pool)
+            m_data = m_living;
+        }
+ 
+        // Sets pool to living (false) : sleeping (true)
+        void toggle_pool(bool sleeping_pool)
         {
             m_current = 0;
-            m_end = 0;
             m_data = sleeping_pool ? m_sleeping : m_living;
-
-            int size = static_cast<int>(m_data.size());
-
-            for (int i = 0; i < size; i++)
-            {
-                Iterator<Cs...>& it = m_data[i];
-
-                it.reset();
-
-                if (!it.empty())
-                {
-                    if (m_end < m_valid.size())
-                    {
-                        m_valid[m_end] = i;
-                    }
-                    else 
-                    {
-                        m_valid.push_back(i);
-                    }
-
-                    m_end++;
-                }
-            }
         }
 
         bool operator!= (const Query<Cs...>& other) const 
@@ -996,21 +1004,18 @@ namespace NECS
 
         auto operator*() -> Extraction<Cs...>
         {
-            auto& iterator = m_data[m_valid[m_current]];
+            auto& iterator = m_data.get()[m_current];
 
             return *iterator;
         }
 
         Query<Cs...>& operator++() 
         {
-            auto& iterator = m_data[m_valid[m_current]];
+            Iterator<Cs...>& iterator = m_data.get()[m_current];
 
             ++iterator;
 
-            if (iterator.done())
-            {
-                m_current++;
-            }
+            if (iterator.done()) advance();
 
             return *this;
         }
@@ -1019,12 +1024,18 @@ namespace NECS
         {
             m_current = 0;
 
+            Iterator<Cs...>& iterator = m_data.get()[m_current];
+
+            iterator.reset();
+
+            if (iterator.empty()) advance();
+
             return *this;
         }
 
         Query<Cs...>& end() 
         {
-            m_current = m_end;
+            m_current = m_data.get().size();
 
             return *this;
         }    
@@ -1297,6 +1308,21 @@ namespace NECS
         }
 
         public:
+            Registry()
+            {
+                [this] <typename... Qs>(Data<Qs...>& qs)
+                {
+                    auto init_query = [this]<typename... Cs>(Query<Cs...>& q)
+                    {
+                        q = Query<Cs...>(m_storages);
+                    };
+
+                    (init_query(std::get<Qs>(qs)),...);
+
+                }
+                (m_queries);
+            }
+
             // TODO: change to toggle_callbacks function and make bool private
             bool run_callbacks = true; // Toggles whether internal callbacks should be called.
 
@@ -1450,7 +1476,7 @@ namespace NECS
             template <typename A>
             auto ids(bool sleeping_pool = false) -> const std::vector<EntityId>&
             {
-                return storage<A>().data(sleeping_pool).ids;
+                return storage<A>().pool(sleeping_pool).ids();
             }
 
             /**
@@ -1507,13 +1533,8 @@ namespace NECS
             auto query(bool sleeping_pool = false) -> Q&
             {
                 auto& q = std::get<Q>(m_queries);
-                
-                if (!q.initialized())
-                {
-                    q.init(m_storages);
-                }
 
-                q.update(sleeping_pool);
+                q.toggle_pool(sleeping_pool);
 
                 return q;
             }
@@ -1721,6 +1742,8 @@ namespace NECS
              * sleeping pool if true, living pool if false.   
              * 
              * @throws Callback is not invocable<EntityId, Data<Cs&...>.
+             * 
+             * TODO: allow for several callback overloads.
              */
 
             template <typename... Cs, typename Callback>

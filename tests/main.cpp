@@ -69,7 +69,7 @@ auto test_ref(EntityId id)
 
 void test_create()
 {
-    EntityId id = reg.create(A4(Health{10}, Position{1, 4}, Name{"First"}));
+    EntityId id = reg.create(A3(Health{10}, Position{1, 4}, Name{"First"}));
 
     auto& info = reg.info(id);
 
@@ -77,7 +77,7 @@ void test_create()
     {
         throw std::runtime_error("Incorrect entity index in entity metadata.");
     }
-    if (!reg.is_type<A4>(id))
+    if (!reg.is_type<A3>(id))
     {
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
@@ -86,17 +86,30 @@ void test_create()
 
     std::cout << "Components:";
 
-    auto [name] = test_view<A4, Name>(id);
+    auto [name] = test_view<A3, Name>(id);
     std::cout << "\n - Name: " << name.value;
 
-    auto [pos] = test_find<A4, Position>(id);
+    auto [pos] = test_find<A3, Position>(id);
     std::cout << "\n - Pos: x: " << pos.x << " y: " << pos.y;
 
-    auto [health] = reg.get<A4, Health>(id);
+    auto [health] = reg.get<A3, Health>(id);
     std::cout << "\n - Health: " << health.value;
 
     std::cout << "\n------------------------------------------------\n";
 };
+
+void test_query()
+{
+    for (auto [id, data] : reg.query<SingleQuery>())
+    {
+        auto& [health] = data;
+
+        std::cout << "------------------------------------------------\n";
+        std::cout << "Components from query: ";
+        std::cout << "\n - Health: " << health.value;
+        std::cout << "\n------------------------------------------------\n";
+    };
+}
 
 void test_id_locking()
 {
@@ -113,6 +126,8 @@ int main()
     std::cout << "=== Running tests ===\n";
     test_subscribe();
     test_create();
+    reg.populate(A2(), 10);
+    test_query();
     std::cout << "=== Run succeeded ===\n";
 
     return 0;
