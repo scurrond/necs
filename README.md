@@ -4,15 +4,26 @@
 
 ## In this repo
 
-#### Tests
+### Benchmarks
 
-(todo)
+Benchmark setup & build file + some result files. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
 
-#### Benchmarks
+All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, run around a 1000 times and then have averages calculated for them.
 
-(todo)
+Build currently only available for windows, prints results to console. Need to eventually switch to a professional benchmarking setup.
 
-#### encs.hpp
+NOTE:
+Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
+
+### Tests
+
+Test setup & build file. Not finished. 
+
+### model.hpp
+
+Data model for testing and benchmarking.
+
+### encs.hpp
 
 Library header file.
 
