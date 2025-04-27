@@ -23,5 +23,5 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo === Build succeeded ===
-.\benchmarks.exe
+.\benchmarks.exe %1
 pause

@@ -2,6 +2,14 @@
 
 Registry<Archetypes, Events, Singletons, Queries> reg;
 
+void test_match()
+{
+    QueryData<For<Health>> data; 
+    using Indices = std::make_index_sequence<std::tuple_size_v<Archetypes>>;
+
+    using Match = Filter::match_index<Archetypes, Indices, Data<Health>, Data<Name>>::type;
+}
+
 void test_subscribe()
 {
     reg.subscribe<EntityCreated>
@@ -100,14 +108,20 @@ void test_create()
 
 void test_query()
 {
-    for (auto [id, data] : reg.query<SingleQuery>())
+    for (auto [id, data] : reg.query<TripleQuery>())
     {
-        auto& [health] = data;
+        auto& [health, pos, name] = data;
 
         std::cout << "------------------------------------------------\n";
         std::cout << "Components from query: ";
         std::cout << "\n - Health: " << health.value;
+        std::cout << "\n - Position: x: " << pos.x << " y: " << pos.y;
+        std::cout << "\n - Name: " << name.value;
         std::cout << "\n------------------------------------------------\n";
+
+        health.value++;
+        pos.x++;
+        name.value = "F";
     };
 }
 
@@ -126,7 +140,7 @@ int main()
     std::cout << "=== Running tests ===\n";
     test_subscribe();
     test_create();
-    reg.populate(A2(), 10);
+    test_query();
     test_query();
     std::cout << "=== Run succeeded ===\n";
 

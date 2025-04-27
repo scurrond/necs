@@ -5,7 +5,7 @@
 
 Registry<Archetypes, Events, Singletons, Queries> reg;
 
-int entity_count = 100000;
+int entity_count = 0;
 
 template <typename F>
 void benchmark(std::string msg, F func, int iterations = 1000)
@@ -69,8 +69,8 @@ void benchmark_for_each()
 }
 
 void benchmark_query()
-{
-    benchmark("Single query: ", [](){
+{    
+    benchmark("1-component query ", [](){
         for (auto [id, data] : reg.query<SingleQuery>())
         {
             auto& [health] = data;
@@ -78,7 +78,7 @@ void benchmark_query()
         }
     });
 
-    benchmark("Double query: ", [](){
+    benchmark("2-component query: ", [](){
         for (auto [id, data] : reg.query<DoubleQuery>())
         {
             auto& [health, pos] = data;
@@ -87,7 +87,7 @@ void benchmark_query()
         }
     });
 
-    benchmark("Triple query: ", [](){
+    benchmark("3-component query: ", [](){
         for (auto [id, data] : reg.query<TripleQuery>())
         {
             auto& [health, pos, name] = data;
@@ -101,7 +101,7 @@ void benchmark_query()
 void benchmark_iter()
 {
 
-    benchmark("Single iter: ", [](){
+    benchmark("1-component iter: ", [](){
         for (auto [id, data] : reg.iter<A3, Health>())
         {
             auto& [health] = data;
@@ -109,7 +109,7 @@ void benchmark_iter()
         }
     });
 
-    benchmark("Double iter: ", [](){
+    benchmark("2-component iter: ", [](){
         for (auto [id, data] : reg.iter<A3, Health, Position>())
         {
             auto& [health, pos] = data;
@@ -118,7 +118,7 @@ void benchmark_iter()
         }
     });
 
-    benchmark("Triple iter: ", [](){
+    benchmark("3-component iter: ", [](){
         for (auto [id, data] : reg.iter<A3, Health, Position, Name>())
         {
             auto& [health, pos, name] = data;
@@ -133,7 +133,7 @@ void benchmark_get()
 {
     auto& ids = reg.ids<A3>();
 
-    benchmark("Single get: ", [&ids](){
+    benchmark("1-component get: ", [&ids](){
         for (auto& id : ids)
         {
             auto [health] = reg.get<A3, Health>(id);
@@ -141,7 +141,7 @@ void benchmark_get()
         }
     });
 
-    benchmark("Double get: ", [&ids](){
+    benchmark("2-component get: ", [&ids](){
         for (auto& id : ids)
         {
             auto [health, pos] = reg.get<A3, Health, Position>(id);
@@ -150,7 +150,7 @@ void benchmark_get()
         }
     });
 
-    benchmark("Triple get: ", [&ids](){
+    benchmark("3-component get: ", [&ids](){
         for (auto& id : ids)
         {
             auto [health, pos, name] = reg.get<A3, Health, Position, Name>(id);
@@ -165,7 +165,7 @@ void benchmark_view()
 {
     auto& ids = reg.ids<A3>();
 
-    benchmark("Single view: ", [&ids](){
+    benchmark("1-component view: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.view<A3, Health>(id);
@@ -175,7 +175,7 @@ void benchmark_view()
         }
     });
 
-    benchmark("Double view: ", [&ids](){
+    benchmark("2-component view: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.view<A3, Health, Position>(id);
@@ -186,7 +186,7 @@ void benchmark_view()
         }
     });
 
-    benchmark("Triple view: ", [&ids](){
+    benchmark("3-component view: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.view<A3, Health, Position, Name>(id);
@@ -203,7 +203,7 @@ void benchmark_find()
 {
     auto& ids = reg.ids<A3>();
 
-    benchmark("Single find: ", [&ids](){
+    benchmark("1-component find: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.find<Health>(id);
@@ -213,7 +213,7 @@ void benchmark_find()
         }
     });
 
-    benchmark("Double find: ", [&ids](){
+    benchmark("2-component find: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.find<Health, Position>(id);
@@ -224,7 +224,7 @@ void benchmark_find()
         }
     });
 
-    benchmark("Triple find: ", [&ids](){
+    benchmark("3-component find: ", [&ids](){
         for (auto& id : ids)
         {
             auto view = reg.find<Health, Position, Name>(id);
@@ -254,9 +254,17 @@ void benchmark_ref()
     });
 }
 
-int main()
+int main(int argc, char* argv[])
 {
-    std::cout << "=== Running benchmarks ===\n";
+
+    if (argc < 2) {
+        std::cerr << "Usage: benchmarks.exe <int>\n";
+        return 1;
+    }
+
+    entity_count = std::stoi(argv[1]);
+
+    std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
     benchmark_create();
     benchmark_for_each();
