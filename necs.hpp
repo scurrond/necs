@@ -213,12 +213,11 @@ namespace NECS
     struct WrapData;
     
     template <
-        template <typename...> class InputWrapper,
         template <typename...> class OuterWrapper,
         template <typename> class InnerWrapper,
         typename... Ts
     >
-    struct WrapData<InputWrapper<Ts...>, OuterWrapper, InnerWrapper> {
+    struct WrapData<Data<Ts...>, OuterWrapper, InnerWrapper> {
         using type = OuterWrapper<InnerWrapper<Ts>...>;
     };
 
@@ -309,6 +308,9 @@ namespace NECS
     /**
      * A type-erased reference to the entire entity at this id. 
      * Its wll be empty if the entity is DEAD.
+     * 
+     * TODO: remove this, memory overhead for no reason.
+     * Better to use find.
      */
     struct EntityRef 
     {
@@ -617,89 +619,70 @@ namespace NECS
     struct Iterator
     {  
         template <typename C>
-        using IteratorVector = std::reference_wrapper<std::vector<C>>;
+        using IteratorVector = std::vector<C>*;
+    
         using IteratorData = std::tuple<IteratorVector<Cs>...>;
-
-        IteratorVector<EntityId> ids;
-        IteratorData data;
-        std::reference_wrapper<size_t> end_index;
     
-        EntityIndex current = 0;
-
-        template <typename C>
-        auto extract_one() -> C&
-        {
-            auto& v = std::get<IteratorVector<C>>(data).get();
-
-            return v[current];
-        }
-    
-        auto extract_all() -> Data<Cs&...>
-        {
-            return std::tie<Cs...>(extract_one<Cs>()...);
-        };
-
-        Iterator(IteratorVector<EntityId> _ids, IteratorData _data, size_t& _end_index)
-            : ids(_ids), data(_data), end_index(_end_index) {}
-
-        Iterator(const Iterator<Cs...>&) = default;
-        Iterator(Iterator<Cs...>&&) = default;
-        Iterator<Cs...>& operator=(const Iterator<Cs...>&) = default;
-        Iterator<Cs...>& operator=(Iterator<Cs...>&&) = default;
-
-        // Called to manually reset the iterator.
-        void reset()
-        {
-            current = 0;
-        }
-
-        // Manual check if the iterator is done.
-        // TDOO: change to is_done
-        bool done()
-        {
-            return current == end_index.get();
-        }
-
-        // Manual check if the iterator contains any data.
-        // TDOO: change to is_empty
-        bool empty()
-        {
-            return end_index.get() == 0;
-        }
-
-        bool operator!= (const Iterator<Cs...>& other) const 
-        {
-            return current != other.current;
-        }
-
-        bool operator== (const Iterator<Cs...>& other) const 
-        {
-            return current == other.current;
-        }
-
-        auto operator*() -> Extraction<Cs...>
-        {
-            return {ids.get()[current], extract_all()};
-        }
-
-        Iterator<Cs...>& operator++() 
-        {
-            current++;
-
-            return *this;
-        }
-
-        Iterator<Cs...>& begin() 
-        {
-            current = 0;
-            return *this;
-        }
-
-        Iterator<Cs...>& end() 
-        {
-            current = end_index.get();
-            return *this;
-        }
+        private: 
+            std::vector<EntityId>* m_ids = nullptr;
+            IteratorData m_data;
+            size_t* m_end = nullptr;
+        
+            EntityIndex m_current = 0;
+        
+            template <typename C>
+            auto extract_one() -> C&
+            {
+                return (*std::get<IteratorVector<C>>(m_data))[m_current];
+            }
+        
+            auto extract_all() -> Data<Cs&...>
+            {
+                return std::tie(extract_one<Cs>()...);
+            }
+        
+        public: 
+            Iterator() = default;
+        
+            Iterator(std::vector<EntityId>* _ids, IteratorData _data, size_t* _end)
+                : m_ids(_ids), m_data(_data), m_end(_end) {}
+                        
+            bool done() const { return m_current == *m_end; }
+        
+            bool empty() const { return *m_end == 0; }
+            
+            auto operator*() -> Extraction<Cs...>
+            {
+                return {(*m_ids)[m_current], extract_all()};
+            }
+        
+            bool operator!=(const Iterator<Cs...>& other) const 
+            {
+                return m_current != other.m_current;
+            }
+        
+            bool operator==(const Iterator<Cs...>& other) const 
+            {
+                return m_current == other.m_current;
+            }
+        
+            Iterator<Cs...>& operator++() 
+            {
+                ++m_current;
+                return *this;
+            }
+        
+            Iterator<Cs...>& begin() 
+            {
+                m_current = 0;
+                return *this;
+            }
+        
+            Iterator<Cs...>& end() 
+            {
+                m_current = *m_end;
+                return *this;
+            }
     };
 
     // ----------------------------------------------------------------------------
@@ -852,7 +835,12 @@ namespace NECS
             template <typename... Cs>
             auto iter() -> Iterator<Cs...>
             {
-                return Iterator<Cs...>(m_ids, std::tie(vector<Cs>()...), m_end);
+                auto ids_ptr = &m_ids;
+                auto end_ptr = &m_end;
+            
+                auto data = std::make_tuple(&vector<Cs>()...);
+            
+                return Iterator<Cs...>(ids_ptr, data, end_ptr);
             }
     };
 
@@ -946,72 +934,28 @@ namespace NECS
     // Query
     // ---------------------------------------------------------------------------- 
 
-    // Struct for wrapping query components to return during queries.
     template <typename... Cs>
-    struct For {};
-
-    // Struct for wrapping query components to check for during queries.
-    // Repeating the same types as in For is undefined behavior.
-    template <typename... Cs>
-    struct With {};
-
-    // Struct for wrapping query components to exclude during queries.
-    // This filters for archetypes that do not have to components in the template.
-    // Repeating the same types as in For is undefined behavior.
-    template <typename... Cs>
-    struct Without {};
-
-    template <typename ForP>
-    struct InitQuery;
-
-    template <typename... Cs>
-    struct InitQuery<For<Cs...>>
-    {
-        using type = std::vector<Iterator<Cs...>>;
-    };
-
-    /**
-     * A pre-configured class containing references to all the component vectors in 
-     * the system that match the template filter. These are stored in iterators.
-     * 
-     * Queries are meant to be chunk iterators and can return an iterator 
-     * corresponding to a single pool at a time. They can be used to spread
-     * iterations across multiple threads or for a flattened for each loop.
-     * 
-     * The references to component vectors will exist for the entire duration of 
-     * the program, so they are safe to keep. 
-     * 
-     * @tparam Cs The components to iterate through.
-     * 
-     * 
-     * TODO: Include a way of generating fresh queries on the fly.
-     * TODO: Include With and Without filters.
-     */
-    template 
-    <
-        typename ForP = For<>, 
-        typename WithP = With<>, 
-        typename WithoutP = Without<>
-    >
     class Query
     {
-        using QueryData = InitQuery<ForP>::type;
+        struct Call 
+        {
+            std::function<Iterator<Cs...>()> iter = {};
+        };
 
-        QueryData m_living;
-        QueryData m_sleeping;
+        std::vector<Call> m_data;
+        Iterator<Cs...> m_iterator;
         size_t m_current = 0;
-        std::reference_wrapper<QueryData> m_data = m_living;
+        bool m_sleeping_pool;
 
         void advance()
         {
             m_current++;
 
-            while (m_current < m_data.get().size())
+            while (m_current < m_data.size())
             {
-                auto& iterator = m_data.get()[m_current];
-                iterator.reset();    
+                m_iterator = m_data[m_current].iter();
                 
-                if (iterator.empty())
+                if (m_iterator.empty())
                 {
                     m_current++;
                 }
@@ -1022,115 +966,93 @@ namespace NECS
             }
         }
 
-        template <typename... Cs>
-        auto chunk(size_t index, For<Cs...>) -> Iterator<Cs...>&
-        {
-            return m_data.get()[index];
-        }
-
-    public:
-        Query() {}
-
-        /**
-         * Populates the query with storages that match the filter. 
-         * 
-         * @tparam As... All the matching archetypes in the system. 
-         * 
-         * @param storages All the matched storages in the system.
-         * 
-         * @throws Query data is empty. At least 1 storage must match the filter, else the
-         * query is redundant and should be removed.
-         */
-        template <typename... As>
-        Query(Data<Storage<As>&...> storages) 
-        {
-            auto f = [this]<typename A, typename... Cs>(Storage<A>& storage, For<Cs...>)
+        public: 
+            template <typename... As>
+            Query(Data<Storage<As>&...> storages, bool sleeping_pool) 
             {
-                m_living.push_back(storage.living.template iter<Cs...>());
-                m_sleeping.push_back(storage.sleeping.template iter<Cs...>());
+                m_sleeping_pool = sleeping_pool;
+
+                auto f = [this]<typename A>(Storage<A>& storage)
+                {
+                    Call call; 
+
+                    call.iter = [this, &storage] ()
+                    {
+                        return storage.template iter<Cs...>(m_sleeping_pool);
+                    };
+
+                    m_data.push_back(call);
+                };
+
+                ((f(std::get<Storage<As>&>(storages))),...);
+
+                if (m_data.size() == 0)
+                {
+                    throw std::runtime_error("@Query::Query - no archetypes match. This query is redundant.");
+                }
             };
 
-            ((f(std::get<Storage<As>&>(storages), ForP{})),...);
-
-            if (m_living.size() == 0 || m_sleeping.size() == 0) 
+            size_t size()
             {
-                throw std::runtime_error
-                ("@ Query::init: query data cannot be empty, the query is redundant. At least 1 storage must match the filter.");
+                return m_data.size();
             }
 
-            m_data = m_living;
-        }
+            auto iter(size_t index) -> Iterator<Cs...>
+            {
+                return m_data[index].iter();
+            }
 
-        /**
-         * Returns the number of iterators in this query. 
-         * This is equal to the amount of storages that match the specifications of this query.
-         *          
-         */
-        size_t iter_count()
-        {
-            return m_data.get().size();
-        }
+            template <typename Callback>
+            void for_each(Callback&& callback, bool sleeping_pool = false)
+            {
+                static_assert(std::is_invocable_v<Callback, Extraction<Cs...>>, "For each callback must take Extraction<Cs...> as argument.");
 
-        /**
-         * Returns the iterator at the provided index. Check with iter_count beforehand. 
-         * Can be used to distribute the query across several worker threads for large loads.
-         */
-        auto& iter(size_t index) 
-        {
-            return chunk(index, ForP{});
-        }
- 
-        // Sets pools to iterate to living (false) : sleeping (true).
-        void toggle_pool(bool sleeping_pool)
-        {
-            m_current = 0;
-            m_data = sleeping_pool ? m_sleeping : m_living;
-        }
+                for (size_t i = 0; i < size(); i++)
+                {
+                    for (auto e : iter(i))
+                    {
+                        callback(e);
+                    }
+                }
+            }
 
+            bool operator!= (const Query<Cs...>& other) const 
+            {
+                return m_current != other.m_current;
+            }
+    
+            auto operator*() -> Extraction<Cs...>
+            {    
+                return *m_iterator;
+            }
+    
+            Query<Cs...>& operator++() 
+            {    
+                ++m_iterator;
+    
+                if (m_iterator.done()) advance();
+    
+                return *this;
+            }
 
-        bool operator!= (const Query<ForP, WithP, WithoutP>& other) const 
-        {
-            return m_current != other.m_current;
-        }
-
-        auto operator*()
-        {
-            auto& iterator = iter(m_current);
-
-            return *iterator;
-        }
-
-        Query<ForP, WithP, WithoutP>& operator++() 
-        {
-            auto& iterator = iter(m_current);
-
-            ++iterator;
-
-            if (iterator.done()) advance();
-
-            return *this;
-        }
-
-        Query<ForP, WithP, WithoutP>& begin() 
-        {
-            m_current = 0;
-
-            auto& iterator = iter(m_current);
-
-            iterator.reset();
-
-            if (iterator.empty()) advance();
-
-            return *this;
-        }
-
-        Query<ForP, WithP, WithoutP>& end() 
-        {
-            m_current = m_data.get().size();
-
-            return *this;
-        }    
-    };
+            Query<Cs...>& begin() 
+            {
+                m_current = 0;
+    
+                m_iterator = m_data[m_current].iter();
+        
+                if (m_iterator.empty()) advance();
+    
+                return *this;
+            }
+    
+            Query<Cs...>& end() 
+            {
+                m_current = m_data.size();
+    
+                return *this;
+            }    
+    };  
 
     // ----------------------------------------------------------------------------
     // Debug
@@ -1307,8 +1229,7 @@ namespace NECS
     <
         typename Archetypes, 
         typename Events, 
-        typename Singletons,
-        typename Queries
+        typename Singletons
     >
     class Registry
     {
@@ -1316,7 +1237,6 @@ namespace NECS
         Storages<Archetypes> m_storages;
         Listeners<Archetypes, Events> m_listeners;
         Singletons m_singletons;
-        Queries m_queries;
 
         bool m_run_callbacks = true;
         
@@ -1401,34 +1321,17 @@ namespace NECS
             }
         }
 
-        template <typename Wis = Data<>, typename Wos = Data<>>
+        template <typename Ws = Data<>, typename Wos = Data<>>
         auto match()
         {
             return [this] <size_t... Is>(std::index_sequence<Is...>)
             {
                 return std::tie(std::get<Is>(m_storages)...);
             }
-            (Filter::Match<Archetypes, Wis, Wos>{});
+            (Filter::Match<Archetypes, Ws, Wos>{});
         }
 
         public:
-            Registry()
-            {
-                [this] <typename... Qs>(Data<Qs...>& qs)
-                {
-                    auto f = [this]
-                    <typename... Cs, typename... Ws, typename... Wos>
-                    (Query<For<Cs...>, With<Ws...>, Without<Wos...>>& q)
-                    {
-                        auto storages = match<Data<Cs..., Ws...>, Data<Wos...>>();
-                        q = Query<For<Cs...>, With<Ws...>, Without<Wos...>>(storages);
-                    };
-
-                    (f(std::get<Qs>(qs)),...);
-                }
-                (m_queries);
-            }
-
             // Toggles whether internal callbacks should be called.
             void toggle_callbacks(bool value)
             {
@@ -1614,14 +1517,46 @@ namespace NECS
              * @returns A reference to the query. Copy the query if
              * a nested query is desired.
              */
-            template <typename Q>
-            auto query(bool sleeping_pool = false) -> Q&
+            // template <typename Q>
+            // auto query(bool sleeping_pool = false) -> Q&
+            // {
+            //     auto& q = std::get<Q>(m_queries);
+
+            //     q.toggle_pool(sleeping_pool);
+
+            //     return q;
+            // }
+
+            template <typename... Cs>
+            auto query(bool sleeping_pool = false) -> Query<Cs...>
             {
-                auto& q = std::get<Q>(m_queries);
+                return Query<Cs...>(match<Data<Cs...>>(), sleeping_pool);
+            }
 
-                q.toggle_pool(sleeping_pool);
+            template <typename With, typename... Cs>
+            auto query_with(bool sleeping_pool = false) -> Query<Cs...>
+            {
+                return [this, &sleeping_pool]<typename... Ws>(Data<Ws...>)
+                {
+                    return Query<Cs...>(match<Data<Cs..., Ws...>>(), sleeping_pool);
+                }
+                (With{});
+            }
 
-                return q;
+            template <typename Without, typename... Cs>
+            auto query_without(bool sleeping_pool = false) -> Query<Cs...>
+            {
+                return Query<Cs...>(match<Data<Cs...>, Without>(), sleeping_pool);
+            }
+
+            template <typename With, typename Without, typename... Cs>
+            auto query_with_without(bool sleeping_pool = false) -> Query<Cs...>
+            {
+                return [this, &sleeping_pool]<typename... Ws>(Data<Ws...>)
+                {
+                    return Query<Cs...>(match<Data<Cs..., Ws...>, Without>(), sleeping_pool);
+                }
+                (With{});            
             }
 
             /**
@@ -1830,24 +1765,20 @@ namespace NECS
              * sleeping pool if true, living pool if false.   
              * 
              * @throws Callback is not invocable<EntityId, Data<Cs&...>.
-             * 
-             * TODO: allow for several callback overloads.
+             *              
              */
-
             template <typename... Cs, typename Callback>
             void for_each(Callback&& callback, bool sleeping_pool = false)
             {
-                static_assert(std::is_invocable_v<Callback, EntityId, Data<Cs&...>>, "For each callback must take EntityId, Entity<Cs&...> as argument.");
+                static_assert(std::is_invocable_v<Callback, Extraction<Cs...>>, "For each callback must take Extraction<Cs...> as argument.");
 
                 [this, &callback, &sleeping_pool]<typename... As>(Data<Storage<As>&...> storages)
                 {
                     auto f = [this, &callback, &sleeping_pool]<typename A>(Storage<A>& s)
                     {
-                        Pool<A>& pool = s.pool(sleeping_pool);
-
-                        for (EntityIndex index = 0; index < pool.count(); index++)
+                        for (auto extraction : s.template iter<Cs...>(sleeping_pool)) 
                         {
-                            callback(pool.ids()[index], pool.template get<Cs...>(index));
+                            callback(extraction);
                         }
                     };
 

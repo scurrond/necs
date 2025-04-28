@@ -3,7 +3,7 @@
 
 #include "../model.hpp"
 
-Registry<Archetypes, Events, Singletons, Queries> reg;
+Registry<Archetypes, Events, Singletons> reg;
 
 int entity_count = 0;
 
@@ -42,15 +42,19 @@ void benchmark_for_each()
 {
     benchmark("For each name: ", [](){
         reg.for_each<Name>
-        ([](EntityId id, Data<Name&> data){
+        ([](Extraction<Name> e){
+            auto& [id, data] = e;
+
             auto& [name] = data;
+
             name.value = "F";
         });
     });
 
     benchmark("For each name & pos: ", [](){
         reg.for_each<Name, Position>
-        ([](EntityId id, Data<Name&, Position&> data){
+        ([](Extraction<Name, Position> e){
+            auto& [id, data] = e;
             auto& [name, position] = data;
             name.value = "F";
             position.x++;
@@ -59,7 +63,8 @@ void benchmark_for_each()
 
     benchmark("For each name, pos & health: ", [](){
         reg.for_each<Name, Position, Health>
-        ([](EntityId id, Data<Name&, Position&, Health&> data){
+        ([](Extraction<Name, Position, Health> e){
+            auto& [id, data] = e;
             auto& [name, position, health] = data;
             name.value = "F";
             position.x++;
@@ -71,7 +76,7 @@ void benchmark_for_each()
 void benchmark_query()
 {    
     benchmark("1-component query ", [](){
-        for (auto [id, data] : reg.query<SingleQuery>())
+        for (auto [id, data] : reg.query<Health>())
         {
             auto& [health] = data;
             health.value++;
@@ -79,7 +84,7 @@ void benchmark_query()
     });
 
     benchmark("2-component query: ", [](){
-        for (auto [id, data] : reg.query<DoubleQuery>())
+        for (auto [id, data] : reg.query<Health, Position>())
         {
             auto& [health, pos] = data;
             health.value++;
@@ -88,7 +93,7 @@ void benchmark_query()
     });
 
     benchmark("3-component query: ", [](){
-        for (auto [id, data] : reg.query<TripleQuery>())
+        for (auto [id, data] : reg.query<Health, Position, Name>())
         {
             auto& [health, pos, name] = data;
             health.value++;
@@ -100,7 +105,6 @@ void benchmark_query()
 
 void benchmark_iter()
 {
-
     benchmark("1-component iter: ", [](){
         for (auto [id, data] : reg.iter<A3, Health>())
         {

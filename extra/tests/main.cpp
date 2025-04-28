@@ -1,6 +1,6 @@
 #include "../model.hpp"
 
-Registry<Archetypes, Events, Singletons, Queries> reg;
+Registry<Archetypes, Events, Singletons> reg;
 
 void test_subscribe()
 {
@@ -100,7 +100,7 @@ void test_create()
 
 void test_query()
 {
-    for (auto [id, data] : reg.query<TripleQuery>())
+    for (auto [id, data] : reg.query<Health, Position, Name>())
     {
         auto& [health, pos, name] = data;
 
@@ -124,7 +124,7 @@ void test_id_locking()
 
 void test_populate()
 {
-    
+    reg.populate(A3(), 3);
 }
 
 int main()
@@ -133,6 +133,7 @@ int main()
     test_subscribe();
     test_create();
     test_query();
+    test_populate();
     test_query();
     std::cout << "=== Run succeeded ===\n";
 
