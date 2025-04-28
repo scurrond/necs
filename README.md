@@ -2,30 +2,27 @@
 
 **NECS** (Nano ECS) is a single-header Entity-Component-System (ECS) library being developed for C++20. It is designed to be simple, small and easy to use.
 
-## In this repo
-
-### Benchmarks
-
-Benchmark setup & build file + some result files. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
-
-All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, run around a 1000 times and then have averages calculated for them.
-
-Build currently only available for windows, prints results to console. Need to eventually switch to a professional benchmarking setup.
-
-NOTE:
-Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
-
-### Tests
-
-Test setup & build file. Not finished. 
-
-### model.hpp
-
-Data model for testing and benchmarking.
+## Contents
 
 ### encs.hpp
-
 Library header file.
+
+### extra/model.hpp
+Data models for testing and benchmarking.
+
+### extra/benchmarks
+- Main benchmarking setup. All benchmarks are done on an archetype with 3 components that are being updated with arbitrary data, iterated a 1000 times and then have averages calculated for them. Some benchmarks are missing for snooze, kill and wake operations for updates and executes.
+- Build file for benchmarks. Currently only available for windows. You must include an entity count as a console argument when running it.
+- Result text files for different operations per entity count. 
+
+NOTE: 
+Currently there is a query overhead for very low entity counts (under 100) of a few 100ns. Queries seem to start performing well at 100+, and well outpacing the for_each iteration method at 1000+ entities. See the relevant files for results.
+
+### extra/tests
+Test setup & build file. Not finished. 
+
+### extra/examples
+Example files of different setups. Not finished.
 
 ## Foreword
 
