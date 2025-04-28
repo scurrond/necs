@@ -1333,6 +1333,8 @@ namespace NECS
         Listeners<Archetypes, Events> m_listeners;
         Singletons m_singletons;
         Queries m_queries;
+
+        bool m_run_callbacks = true;
         
         template <typename A>
         auto storage() -> Storage<A>&
@@ -1407,7 +1409,8 @@ namespace NECS
             m_entities.counter[req_state]--;
             m_entities.counter[res_state]++;
             state = res_state;
-            if (run_callbacks) 
+
+            if (m_run_callbacks) 
             {
                 call<EntityUpdated>({id, req_state, res_state});
                 on_update<A>();
@@ -1442,8 +1445,11 @@ namespace NECS
                 (m_queries);
             }
 
-            // TODO: change to toggle_callbacks function and make bool private
-            bool run_callbacks = true; // Toggles whether internal callbacks should be called.
+            // Toggles whether internal callbacks should be called.
+            void toggle_callbacks(bool value)
+            {
+                m_run_callbacks = value;
+            };
 
             /**
              * Performs a runtime typecheck on the entity.
@@ -1801,7 +1807,7 @@ namespace NECS
                     (A{});
                 };
     
-                if (run_callbacks) 
+                if (m_run_callbacks) 
                 {
                     call<EntityCreated>({id});
                     on_update<A>();
@@ -1934,7 +1940,7 @@ namespace NECS
             {
                 auto callback = [this, &id] (EntityState req_state, EntityState res_state) 
                 {
-                    if (run_callbacks) call<EntityUpdated>({id, req_state, res_state});
+                    if (m_run_callbacks) call<EntityUpdated>({id, req_state, res_state});
                 };
 
                 m_entities.queue(id, task, callback);
