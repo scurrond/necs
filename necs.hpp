@@ -1077,22 +1077,32 @@ namespace NECS
             m_data = m_living;
         }
 
+        /**
+         * Returns the number of iterators in this query. 
+         * This is equal to the amount of storages that match the specifications of this query.
+         *          
+         */
         size_t iter_count()
         {
             return m_data.get().size();
         }
 
+        /**
+         * Returns the iterator at the provided index. Check with iter_count beforehand. 
+         * Can be used to distribute the query across several worker threads for large loads.
+         */
         auto& iter(size_t index) 
         {
             return chunk(index, ForP{});
         }
  
-        // Sets pool to living (false) : sleeping (true)
+        // Sets pools to iterate to living (false) : sleeping (true).
         void toggle_pool(bool sleeping_pool)
         {
             m_current = 0;
             m_data = sleeping_pool ? m_sleeping : m_living;
         }
+
 
         bool operator!= (const Query<ForP, WithP, WithoutP>& other) const 
         {
