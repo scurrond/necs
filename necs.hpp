@@ -41,15 +41,15 @@ namespace NECS
         };
 
         template<typename...>
-        struct id_locked_types;
+        struct unique_types;
 
         template<>
-        struct id_locked_types<> { using type = std::tuple<>; };
+        struct unique_types<> { using type = std::tuple<>; };
 
         template<typename T, typename... Rest>
-        struct id_locked_types<T, Rest...> 
+        struct unique_types<T, Rest...> 
         {
-            using Tail = typename id_locked_types<Rest...>::type;
+            using Tail = typename unique_types<Rest...>::type;
 
             static constexpr bool is_duplicate = (std::is_same_v<T, Rest> || ...);
 
@@ -75,7 +75,7 @@ namespace NECS
             template<typename... Ts>
             struct to_types<std::tuple<Ts...>> 
             {
-                using type = typename id_locked_types<Ts...>::type;
+                using type = typename unique_types<Ts...>::type;
             };
 
             using type = typename to_types<combined>::type;
@@ -209,12 +209,26 @@ namespace NECS
     template <typename... Ts>
     using Data = std::tuple<Ts...>; 
 
+    template <typename T, template <typename...> class OuterWrapper, template <typename> class InnerWrapper>
+    struct WrapData;
+    
+    template <
+        template <typename...> class InputWrapper,
+        template <typename...> class OuterWrapper,
+        template <typename> class InnerWrapper,
+        typename... Ts
+    >
+    struct WrapData<InputWrapper<Ts...>, OuterWrapper, InnerWrapper> {
+        using type = OuterWrapper<InnerWrapper<Ts>...>;
+    };
+
     /**
      * Optional data alias.
      * Used in VIEW functions for safety.
      */    
     template <typename... Cs> 
     using View = std::optional<Data<Cs&...>>;
+
 
     // ----------------------------------------------------------------------------
     // Entity
@@ -540,7 +554,7 @@ namespace NECS
     {
         return []<typename... As>(std::tuple<As...>) 
         {
-            using id_lockedComponents = typename Filter::merge_types<As...>::type;
+            using UniqueComponents = typename Filter::merge_types<As...>::type;
 
             return [] <typename... Cs> (std::tuple<Cs...>)
             {   
@@ -552,7 +566,7 @@ namespace NECS
                     Listener<DataUpdated<Cs>>...
                 >{};
             } 
-            (id_lockedComponents{});
+            (UniqueComponents{});
         }
         (T{});
     }
@@ -589,15 +603,6 @@ namespace NECS
     // ----------------------------------------------------------------------------
     // Iterator
     // ---------------------------------------------------------------------------- 
-
-    // TODO: stop using this, std::vector<C>& is good enough. 
-    // TODO: remove reference wrappers and use pure references, iterators
-    // should not be movable
-    template <typename C>
-    using IteratorVector = std::reference_wrapper<std::vector<C>>;
-
-    template <typename... Cs>
-    using IteratorData = std::tuple<IteratorVector<Cs>...>;
     
     /**
      * A pool-level iterator.
@@ -611,8 +616,12 @@ namespace NECS
     template <typename... Cs>
     struct Iterator
     {  
+        template <typename C>
+        using IteratorVector = std::reference_wrapper<std::vector<C>>;
+        using IteratorData = std::tuple<IteratorVector<Cs>...>;
+
         IteratorVector<EntityId> ids;
-        IteratorData<Cs...> data;
+        IteratorData data;
         std::reference_wrapper<size_t> end_index;
     
         EntityIndex current = 0;
@@ -630,88 +639,72 @@ namespace NECS
             return std::tie<Cs...>(extract_one<Cs>()...);
         };
 
-        // TODO: make it less janky, you don't need public here
-        public:
-            Iterator(IteratorVector<EntityId> _ids, IteratorData<Cs...> _data, size_t& _end_index)
-                : ids(_ids), data(_data), end_index(_end_index) {}
+        Iterator(IteratorVector<EntityId> _ids, IteratorData _data, size_t& _end_index)
+            : ids(_ids), data(_data), end_index(_end_index) {}
 
-            Iterator(const Iterator<Cs...>&) = default;
-            Iterator(Iterator<Cs...>&&) = default;
-            Iterator<Cs...>& operator=(const Iterator<Cs...>&) = default;
-            Iterator<Cs...>& operator=(Iterator<Cs...>&&) = default;
+        Iterator(const Iterator<Cs...>&) = default;
+        Iterator(Iterator<Cs...>&&) = default;
+        Iterator<Cs...>& operator=(const Iterator<Cs...>&) = default;
+        Iterator<Cs...>& operator=(Iterator<Cs...>&&) = default;
 
-            // Called to manually reset the iterator.
-            void reset()
-            {
-                current = 0;
-            }
+        // Called to manually reset the iterator.
+        void reset()
+        {
+            current = 0;
+        }
 
-            // Manual check if the iterator is done.
-            // TDOO: change to is_done
-            bool done()
-            {
-                return current == end_index.get();
-            }
+        // Manual check if the iterator is done.
+        // TDOO: change to is_done
+        bool done()
+        {
+            return current == end_index.get();
+        }
 
-            // Manual check if the iterator contains any data.
-            // TDOO: change to is_empty
-            bool empty()
-            {
-                return end_index.get() == 0;
-            }
+        // Manual check if the iterator contains any data.
+        // TDOO: change to is_empty
+        bool empty()
+        {
+            return end_index.get() == 0;
+        }
 
-            bool operator!= (const Iterator<Cs...>& other) const 
-            {
-                return current != other.current;
-            }
+        bool operator!= (const Iterator<Cs...>& other) const 
+        {
+            return current != other.current;
+        }
 
-            bool operator== (const Iterator<Cs...>& other) const 
-            {
-                return current == other.current;
-            }
+        bool operator== (const Iterator<Cs...>& other) const 
+        {
+            return current == other.current;
+        }
 
-            auto operator*() -> Extraction<Cs...>
-            {
-                return {ids.get()[current], extract_all()};
-            }
+        auto operator*() -> Extraction<Cs...>
+        {
+            return {ids.get()[current], extract_all()};
+        }
 
-            Iterator<Cs...>& operator++() 
-            {
-                current++;
+        Iterator<Cs...>& operator++() 
+        {
+            current++;
 
-                return *this;
-            }
+            return *this;
+        }
 
-            Iterator<Cs...>& begin() 
-            {
-                current = 0;
-                return *this;
-            }
+        Iterator<Cs...>& begin() 
+        {
+            current = 0;
+            return *this;
+        }
 
-            Iterator<Cs...>& end() 
-            {
-                current = end_index.get();
-                return *this;
-            }
+        Iterator<Cs...>& end() 
+        {
+            current = end_index.get();
+            return *this;
+        }
     };
 
     // ----------------------------------------------------------------------------
     // Pool
     // ---------------------------------------------------------------------------- 
-
-    template <typename A>
-    auto InitPoolData()
-    {   
-        return []<typename... Cs>(Data<Cs...>)
-        {
-            return std::tuple<std::vector<Cs>...>{};
-        }
-        (A{});
-    }
-
-    // A tuple of std::vector<C> for each component of the archetype.
-    template <typename A>
-    using PoolData = std::invoke_result_t<decltype(InitPoolData<A>)>;
 
     /**
      * Base archetype storage class.
@@ -725,9 +718,12 @@ namespace NECS
     template <typename A>
     class Pool
     {
+        // A tuple of std::vector<C> for each component of the archetype.
+        using PoolData = WrapData<A, Data, std::vector>::type;
+
         EntityIndex m_end = 0;
         EntityIndex m_total = 0;
-        PoolData<A> m_data;
+        PoolData m_data;
         std::vector<EntityId> m_ids;
 
         template <typename C>
@@ -944,17 +940,7 @@ namespace NECS
     };
     
     template <typename As>
-    auto InitStorages()
-    {
-        return []<typename... Ts> (std::tuple<Ts...>)
-        {
-            return Data<Storage<Ts>...>{};
-        }
-        (As{});
-    };
-
-    template <typename Tuple>
-    using Storages = std::invoke_result_t<decltype(InitStorages<Tuple>)>;
+    using Storages = WrapData<As, Data, Storage>::type;
 
     // ----------------------------------------------------------------------------
     // Query
@@ -976,17 +962,13 @@ namespace NECS
     struct Without {};
 
     template <typename ForP>
-    auto InitQueryData()
-    {
-        return []<typename... Cs>(For<Cs...>)
-        {
-            return std::vector<Iterator<Cs...>>{};
-        }
-        (ForP{});
-    };
+    struct InitQuery;
 
-    template <typename ForP> 
-    using QueryData = std::invoke_result_t<decltype(InitQueryData<ForP>)>;
+    template <typename... Cs>
+    struct InitQuery<For<Cs...>>
+    {
+        using type = std::vector<Iterator<Cs...>>;
+    };
 
     /**
      * A pre-configured class containing references to all the component vectors in 
@@ -1013,10 +995,12 @@ namespace NECS
     >
     class Query
     {
-        QueryData<ForP> m_living;
-        QueryData<ForP> m_sleeping;
+        using QueryData = InitQuery<ForP>::type;
+
+        QueryData m_living;
+        QueryData m_sleeping;
         size_t m_current = 0;
-        std::reference_wrapper<QueryData<ForP>> m_data = m_living;
+        std::reference_wrapper<QueryData> m_data = m_living;
 
         void advance()
         {
