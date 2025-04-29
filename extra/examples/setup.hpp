@@ -2,6 +2,8 @@
 
 #include "../../necs.hpp"
 
+using namespace NECS;
+
 // ----------------------------------------------------------------------------
 // Components
 // ----------------------------------------------------------------------------
@@ -17,36 +19,32 @@ struct Position
     size_t y;
 };
 
+struct Health
+{
+    int value;
+};
+
 // ----------------------------------------------------------------------------
 // Archetypes
 // ----------------------------------------------------------------------------
 
-using Monster = NECS::Data<Position, Name>;
-
-// ----------------------------------------------------------------------------
-// Queries
-// ----------------------------------------------------------------------------
-
-using NameQuery = NECS::Query<Name>;
-using PositionQuery = NECS::Query<Position>;
-using PositionNameQuery = NECS::Query<Position, Name>;
+using Monster = Data<Position, Name, Health>;
 
 // ----------------------------------------------------------------------------
 // Registry data
 // ----------------------------------------------------------------------------
 
-using Archetypes = NECS::Data<Monster>;
-using Events = NECS::Data<>;
-using Singletons = NECS::Data<>;
-using Queries = NECS::Data<NameQuery, PositionQuery, PositionNameQuery>;
+using Archetypes = Data<Monster>;
+using Events = Data<>;
+using Singletons = Data<>;
 
-NECS::Registry<Archetypes, Events, Singletons, Queries> registry;
+Registry<Archetypes, Events, Singletons> registry;
 
 int main() 
 {    
     registry.populate(Monster(), 100);
 
-    for (auto [id, data] : registry.iter<Monster, Name>())
+    for (auto [id, data] : registry.query_in<Monster, Name>())
     {
         auto& [name] = data;
 
@@ -68,14 +66,14 @@ void create()
 void change()
 {
     // Changes data after update is called
-    registry.queue(0, NECS::KILL);
-    registry.queue(1, NECS::SNOOZE);
+    registry.queue(0, KILL);
+    registry.queue(1, SNOOZE);
     registry.update();
 
     // Changes data instantly
-    registry.execute(1, NECS::WAKE);
-    registry.execute(2, NECS::KILL);
-    registry.execute(3, NECS::SNOOZE);
+    registry.execute(1, WAKE);
+    registry.execute(2, KILL);
+    registry.execute(3, SNOOZE);
 }
 
 void check()
@@ -93,7 +91,7 @@ void check()
     registry.is_type<Monster>(0);
 
     // is the entity with id 0 dead
-    registry.is_dead(0);
+    registry.is_state(0, DEAD);
 }
 
 void access()
@@ -101,39 +99,45 @@ void access()
     // VIEW returns nullopt if entity is dead or the type is incorrect
     auto [name0] = registry.view<Monster, Name>(0).value();
 
-    // FIND filters and iterates over every archetype, returns a view
-    auto [name1] = registry.find<Name>(1).value();
-
-    // REF returns the entire entity related to this id
-    auto [pos, name2] = registry.ref(2).get<Monster>();
-
     // GET panics if the type is incorrect or the entity is DEAD
     auto [name3] =  registry.get<Monster, Name>(3);
+
+    // FIND filters and iterates over every archetype, returns a view
+    auto [name1] = registry.find<Name>(1).value();
 }
 
-void iterate()
+void query()
 {
-    // One-time dynamic storage iterator, useful for iterating through a single archetype
-    for (auto [id, data] : registry.iter<Monster, Name, Position>())
+    // Query in a single archetype
+    auto iterator = registry.query_in<Monster, Name, Position>();
+
+    for (auto [id, data] : iterator)
     {
         auto& [name, position] = data;
 
         name.value = "New name";
     } 
 
-    // Templated, pre-configured queries that iterate through the whole system
-    // It MUST have non-zero amount of storage chunks to iterate through 
-    for (auto [id, data] : registry.query<PositionNameQuery>())
+    // Query with different requirements
+    Query<Name> query = registry.query<Name>();
+    Query<Name> query_with = registry.query_with<Data<Position>, Name>();
+    Query<Name> query_without = registry.query_without<Data<Position>, Name>();
+    Query<Name> query_with_without = registry.query_with_without<Data<Position>, Data<Health>, Name>();
+
+    // Iterate with for loop 
+    for (auto [id, data] : query)
     {
-        auto& [position, name] = data;
+        auto& [name] = data;
 
         name.value = "New name";
     }
 
-    // Dynamic alternative to queries, filter and iterates
-    registry.for_each<Position, Name>
-    ([](NECS::EntityId id, NECS::Data<Position&, Name&> data) {
-        auto& [position, name] = data;
+    // Iterate with callback
+    query.for_each([](Extraction<Name> e) 
+    {
+        auto& [id, data] = e;
+
+        auto& [name] = data;
 
         name.value = "New name";
     });

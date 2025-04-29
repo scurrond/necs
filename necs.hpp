@@ -233,26 +233,12 @@ namespace NECS
     // Entity
     // ---------------------------------------------------------------------------- 
 
-    // TODO: make aliases more generic and move them up 
-
     /**
      * A unique index associated with an entity. It will remain contant across 
      * the entity's lifetime. Dead entities have their ids reused if they aren't
      * id_locked (made life-time unique).
      */
     using EntityId = size_t;
-
-    /**
-     * The resulting type info object obtained from std::type_index(typeid(A)).
-     * Used to check the entity's archetype at runtime when all you have is the id.
-     */
-    using EntityType = std::type_index;
-
-    /**
-     * The entity's index inside of its pool. This is different to its id, 
-     * as it can change at any point. 
-     */
-    using EntityIndex = size_t;
 
     /**
      * The action to perform on an entity, either right away or delayed.
@@ -293,71 +279,20 @@ namespace NECS
     // The total number of EntityStates.
     const size_t STATE_COUNT = 6;
 
-    /**
-     * A struct containing some location info on an entity. 
-     * TODO: trash this and use vectors for each value in Entities.
-     */
+    // A struct containing some location info on an entity. 
     struct EntityInfo
     {
-        EntityType type = std::type_index(typeid(int));
-        EntityIndex index = -1;
+        std::type_index type = std::type_index(typeid(int));
+        size_t index = -1;
         EntityState state = LIVE;
         bool id_locked = false;
     };
 
-    /**
-     * A type-erased reference to the entire entity at this id. 
-     * Its wll be empty if the entity is DEAD.
-     * 
-     * TODO: remove this, memory overhead for no reason.
-     * Better to use find.
-     */
-    struct EntityRef 
-    {
-        std::any data;
-        EntityType type;
-
-        EntityRef(EntityType _type)
-            : type(_type) {}
-
-        template <typename... Cs>
-        EntityRef(Data<Cs&...> _data)
-            : data(_data), type(std::type_index(typeid(Data<Cs...>))) {}
-
-        // Archetype check.
-        template <typename A>
-        bool is_type() 
-        {
-            return type == std::type_index(typeid(A));
-        }
-
-        // Value check.
-        bool is_empty()
-        {
-            return !data.has_value();
-        } 
-
-        // Extracts entity. Check if valid before you do this.
-        template <typename A>
-        auto get()
-        {
-            return [this]<typename... Cs>(Data<Cs...>)
-            {   
-                return std::any_cast<Data<Cs&...>>(data);
-            }
-            (A{});
-        }
-    };
-
-    /**
-     * A struct containing an info struct and utility methods. 
-     * TODO: trash this and use vectors for each value in Entities.
-     */
+     // A struct containing an info struct and utility methods. 
     struct EntityData
     {
         EntityInfo info; // Location data on the entity inside of its storage.
         std::function<void()> update = {};
-        std::function<EntityRef()> ref = {};
     };
 
     /**
@@ -365,20 +300,23 @@ namespace NECS
      * Contains type-erased data and manages EntityId allocations.
      * 
      * It is always called on internally and is not exposed. 
-     * 
-     * TODO: change dead to to_reuse, as that is more descriptive.
-     * TODO: move logic to registry to respect the centralized design as much as 
-     * possible. It doesn't need to be separated.
      */
     struct Entities 
     {
-        size_t to_update_end = 0; 
-        std::vector<EntityId> to_update; // Ids to update by the registry.
-        std::vector<EntityId> dead; // Erased ids that can be reused.
+        // ---- Entity data ---- //
+
         std::vector<EntityData> data; // Vector of all the entities currently in the system, at their EntityId index.
 
+        // ---- Counter ---- //
+
         std::array<size_t, STATE_COUNT> counter; // Holds the amount of entites available by state.
-        
+
+        // ---- State management ---- //
+
+        size_t to_update_end = 0; 
+        std::vector<EntityId> to_update; // Ids to update by the registry.
+        std::vector<EntityId> to_reuse; // Erased ids that can be reused.
+
         /**
          * Ties an id and metadata to a new entity. An id will be reused if available.
          * 
@@ -388,15 +326,14 @@ namespace NECS
          */
         auto create(EntityInfo info) -> std::pair<EntityId, EntityData&>
         {
-            //TODO: change this to info.state
-            counter[LIVE]++;
+            counter[info.state]++;
 
-            if (dead.size() > 0)
+            if (to_reuse.size() > 0)
             {   
                 counter[DEAD]--;
-                EntityId id = dead.back();
+                EntityId id = to_reuse.back();
                 data[id] = {info};
-                dead.pop_back();
+                to_reuse.pop_back();
                 return {id, data[id]};
             }
             else 
@@ -429,8 +366,6 @@ namespace NECS
          * @param id The entity to queue.
          * @param task The type of task to queue for. 
          * @param callback The event callback to call on success.
-         * 
-         * TODO: Static assert on callback.
          */
         template <typename Callback>
         void queue(EntityId id, EntityTask task, Callback&& callback)
@@ -512,35 +447,13 @@ namespace NECS
      * The listener is always called on internally and is not exposed.
      * 
      * @tparam E The event to listen to.
-     * 
-     * TODO: make into struct and move logic into registry.
-     * TODO: separate function initialized and subscription booleans.
      */
     template <typename E>
-    class Listener 
+    struct Listener 
     {   
-        bool m_ready = false;
-        std::function<void(E)> m_callback = {};
-
-        public:
-            template <typename Callback>
-            void subscribe(Callback&& callback)
-            {
-                static_assert(std::is_invocable_v<Callback, E>, "Event callback must take event as argument.");
-
-                m_callback = callback;
-                m_ready = true;
-            }
-
-            void unsubscribe()
-            {
-                m_ready = false;
-            }
-
-            void call(E event)
-            {
-                if (m_ready) m_callback(event);
-            }
+        bool set = false; // is the function set for the first time
+        bool ready = false; // is the current callback subscribed
+        std::function<void(E)> callback = {}; // the callback to call
     };
 
     // Empty, built-in templated event for A and C, fired whenever data moves around in the registry.
@@ -628,7 +541,7 @@ namespace NECS
             IteratorData m_data;
             size_t* m_end = nullptr;
         
-            EntityIndex m_current = 0;
+            size_t m_current = 0;
         
             template <typename C>
             auto extract_one() -> C&
@@ -704,8 +617,8 @@ namespace NECS
         // A tuple of std::vector<C> for each component of the archetype.
         using PoolData = WrapData<A, Data, std::vector>::type;
 
-        EntityIndex m_end = 0;
-        EntityIndex m_total = 0;
+        size_t m_end = 0;
+        size_t m_total = 0;
         PoolData m_data;
         std::vector<EntityId> m_ids;
 
@@ -736,7 +649,7 @@ namespace NECS
         }
 
         template <typename C>
-        void swap(EntityIndex index)
+        void swap(size_t index)
         {
             auto& v = vector<C>();
             std::swap(v[index], v[m_end - 1]);
@@ -789,7 +702,7 @@ namespace NECS
                 return m_ids;
             }
 
-            auto get(EntityIndex index)
+            auto get(size_t index)
             {
                 return [this, &index]<typename... Cs>(Data<Cs...>)
                 {
@@ -799,12 +712,12 @@ namespace NECS
             }
         
             template <typename... Cs>
-            auto get(EntityIndex index) -> Data<Cs&...>
+            auto get(size_t index) -> Data<Cs&...>
             {
                 return std::tie<Cs...>(vector<Cs>()[index]...);
             }
 
-            auto clone(EntityIndex index)
+            auto clone(size_t index)
             {
                 return [this, &index]<typename... Cs>(Data<Cs...>)
                 {
@@ -814,12 +727,12 @@ namespace NECS
             }    
 
             template <typename... Cs>
-            auto clone(EntityIndex index) -> Data<Cs...>
+            auto clone(size_t index) -> Data<Cs...>
             {
                 return get<Cs...>(index);
             }    
         
-            auto remove(EntityIndex index) -> EntityId 
+            auto remove(size_t index) -> EntityId 
             {
                 [this, &index]<typename... Cs>(Data<Cs...>)
                 {
@@ -856,10 +769,6 @@ namespace NECS
      * an entity's state.
      * 
      * @tparam A The archetype of this storage.
-     * 
-     * TODO: Move apply logic to registry's apply function, it doesn't need to be here. 
-     * The iter and get functions can also be removed and replaced with a private pool function in 
-     * the registry. The storage can just be a glorified double pool container.
      */
     template <typename A>
     struct Storage
@@ -868,7 +777,7 @@ namespace NECS
         Pool<A> sleeping;
 
         template <typename... Cs>
-        auto get(EntityIndex index, bool sleeping_pool) -> Data<Cs&...>
+        auto get(size_t index, bool sleeping_pool) -> Data<Cs&...>
         {   
             auto& data = sleeping_pool ? sleeping : living;
             return data.template get<Cs...>(index);
@@ -885,46 +794,6 @@ namespace NECS
         {
             return sleeping_pool ? sleeping : living;
         }
-
-        auto apply_kill(EntityIndex index) -> EntityId
-        {
-            if (living.total() == 0 || living.count() < 1 || index >= living.count())
-            {
-                throw std::invalid_argument("Entity marked KILLED in empty living vector or index out of bounds.");
-            }
-            else 
-            {
-                return living.remove(index);
-            }
-        }
-
-        auto apply_snooze(EntityIndex index) -> EntityId
-        {
-            if (living.total() == 0 || living.count() < 1 || index >= living.count())
-            {
-                throw std::invalid_argument("Entity marked SNOOZED in empty living vector or index out of bounds.");
-            }
-            else 
-            {
-                const EntityId& id = living.ids()[index];
-                sleeping.add(id, living.clone(index)); // copy entity into living
-                return living.remove(index);
-            }
-        }
-
-        auto apply_wake(EntityIndex index) -> EntityId
-        {
-            if (sleeping.total() == 0 || sleeping.count() < 1 || index >= sleeping.count())
-            {
-                throw std::invalid_argument("Entity marked AWAKE in empty sleeping vector or index out of bounds.");
-            }
-            else 
-            {
-                const EntityId& id = sleeping.ids()[index];
-                living.add(id, sleeping.clone(index)); // copy entity into living
-                return sleeping.remove(index);
-            }
-        }
     };
     
     template <typename As>
@@ -934,6 +803,10 @@ namespace NECS
     // Query
     // ---------------------------------------------------------------------------- 
 
+    /**
+     * Main iterator class containing references to all the matching storages
+     * in the system.
+     */
     template <typename... Cs>
     class Query
     {
@@ -997,19 +870,28 @@ namespace NECS
                 return m_data.size();
             }
 
-            auto iter(size_t index) -> Iterator<Cs...>
+            auto chunk(size_t index) -> Iterator<Cs...>
             {
                 return m_data[index].iter();
             }
 
+           /** 
+            * Alternative to for loops.
+            * Iterates through all the storages in the system that match the components.
+            * 
+            * @tparam Cs... The components to filter for. 
+            * @tparam Callback Must be invocable<EntityId, Data<Cs&...>.
+            * 
+            * @param callback The callback to execute for each entity.
+            */
             template <typename Callback>
-            void for_each(Callback&& callback, bool sleeping_pool = false)
+            void for_each(Callback&& callback)
             {
                 static_assert(std::is_invocable_v<Callback, Extraction<Cs...>>, "For each callback must take Extraction<Cs...> as argument.");
 
                 for (size_t i = 0; i < size(); i++)
                 {
-                    for (auto e : iter(i))
+                    for (auto e : chunk(i))
                     {
                         callback(e);
                     }
@@ -1201,7 +1083,7 @@ namespace NECS
                 return;
             };
 
-            for (EntityIndex index = 0; index < pool.count(); index++)
+            for (size_t index = 0; index < pool.count(); index++)
             {
                 print_entity<A>(pool.ids()[index]);
             }
@@ -1240,10 +1122,18 @@ namespace NECS
 
         bool m_run_callbacks = true;
         
+        // ---- Private access ---- //
+
         template <typename A>
         auto storage() -> Storage<A>&
         {
             return std::get<Storage<A>>(m_storages);
+        }
+
+        template <typename A>
+        auto pool(bool sleeping_pool) -> Pool<A>&
+        {
+            return storage<A>().pool(sleeping_pool);
         }
 
         template <typename E>
@@ -1251,6 +1141,8 @@ namespace NECS
         {
             return std::get<Listener<E>>(m_listeners);
         }
+
+        // ---- Utils ---- //
 
         template <typename A>
         void on_update()
@@ -1274,24 +1166,26 @@ namespace NECS
             {
                 case AWAKE:
                 {
-                    EntityId swapped_entity = s.apply_wake(index);
+                    s.living.add(id, s.sleeping.clone(index)); // copy entity into living
+                    EntityId swapped_entity = s.sleeping.remove(index);
                     m_entities.data[swapped_entity].info.index = index;
                     index = s.living.count() - 1;
                     break;
                 };
                 case KILLED: 
                 {
-                    EntityId swapped_entity = s.apply_kill(index);
+                    EntityId swapped_entity = s.living.remove(index);
                     m_entities.data[swapped_entity].info.index = index;
                     if (!id_locked)
                     {
-                        m_entities.dead.push_back(id);
+                        m_entities.to_reuse.push_back(id);
                     }
                     break;
                 };
                 case SNOOZED:
                 {
-                    EntityId swapped_entity = s.apply_snooze(index);
+                    s.sleeping.add(id, s.living.clone(index)); // copy entity into living
+                    EntityId swapped_entity = s.living.remove(index);
                     m_entities.data[swapped_entity].info.index = index;
                     index = s.sleeping.count() - 1;
                     break;
@@ -1332,11 +1226,8 @@ namespace NECS
         }
 
         public:
-            // Toggles whether internal callbacks should be called.
-            void toggle_callbacks(bool value)
-            {
-                m_run_callbacks = value;
-            };
+
+            // ---- Checks ---- //
 
             /**
              * Performs a runtime typecheck on the entity.
@@ -1353,15 +1244,6 @@ namespace NECS
             {
                 auto& i = info(id);
                 return i.type == std::type_index(typeid(A));
-            }
-
-            /**
-             * TODO: remove, useless, use is_state
-             */
-            bool is_dead(EntityId id)
-            {
-                auto& i = info(id);
-                return i.state == DEAD;
             }
 
             /**
@@ -1393,12 +1275,15 @@ namespace NECS
             template <typename A>
             bool is_empty(bool sleeping_pool = false)
             {
-                //TODO: fix bug or change pool_count & pool_total to count and total
-                return count<A>(sleeping_pool) == 0;
+                return pool_count<A>(sleeping_pool) == 0;
             }
+
+            // ---- Counters ---- //
 
             /**
              * Gets the number of total entities of any state currently in the system.
+             * 
+             * This includes dead entities.
              */
             size_t total()
             {
@@ -1409,10 +1294,8 @@ namespace NECS
              * Gets the number of total entities in a state currently in the system.
              * 
              * @param state The state to check.
-             * 
-             * TODO: change name to total
              */
-            size_t count(EntityState state)
+            size_t state_total(EntityState state)
             {
                 return m_entities.counter[state];
             }
@@ -1423,16 +1306,12 @@ namespace NECS
              * @tparam A The archetype pool to check.
              * 
              * @param sleeping_pool False by default, checks sleeping pool if 
-             * true, living pool if false.
-             * 
-             * TODO: change name to total
+             * true, living pool if false.     
              */
             template <typename A>
             size_t pool_total(bool sleeping_pool = false)
             {
-                Pool<A>& pool = storage<A>().pool(sleeping_pool);
-
-                return pool.total();
+                return pool<A>().total();
             }
 
             /**
@@ -1442,26 +1321,88 @@ namespace NECS
              * 
              * @param sleeping_pool False by default, checks sleeping pool if 
              * true, living pool if false.
-             * 
-             * TODO: change name to total
              */
             template <typename A>
             size_t pool_count(bool sleeping_pool = false)
             {
-                Pool<A>& pool = storage<A>().pool(sleeping_pool);
-
-                return pool.count();
+                return pool<A>().count();
             }
  
-            auto ref(EntityId id) -> EntityRef
+            // ---- Events ---- //
+
+            /**
+             * Adds a callback to an event listener.
+             * 
+             * @tparam E The event of the listener. 
+             * @tparam Callback invocable<E>. 
+             * 
+             * @param callback The function to call for this event.
+             * 
+             * @throws Callback is not invocable<E>. 
+             */
+            template <typename E, typename Callback>
+            void subscribe(Callback&& callback)
             {
-                return m_entities.data[id].ref();
+                static_assert(std::is_invocable_v<Callback, E>, "@Registry::subscribe: Event callback must take event as argument.");
+
+                auto& l = listener<E>();
+                l.callback = callback;
+                l.ready = true;
+                l.set = true;
+            }
+
+            /**
+             * Marks a callback as not ready.
+             * 
+             * @tparam E The event of the listener.
+             */
+            template <typename E>
+            void unsubscribe()
+            {
+                auto& l = listener<E>();
+                l.ready = false;
+            }
+
+            /**
+             * Marks a previously set callback as ready again.
+             * 
+             * @tparam E The event of the listener.
+             */
+            template <typename E>
+            void resubscribe()
+            {
+                auto& l = listener<E>();
+                if (l.set) l.ready = false;
+            }
+
+            /**
+             * Calls the listener callback for this event.
+             * 
+             * @tparam E The event of the listener.
+             * 
+             * @param event The event to pass to the callback.
+             */
+            template <typename E>
+            void call(E event)
+            {
+                auto& l = listener<E>();
+                if (l.ready) l.callback(event);
+            }
+
+            // ---- Data access  ---- //
+
+            /**
+             * Creates a debugger class to expose storages and entities. 
+             * 
+             * @returns A new debugger.
+             */
+            auto debugger()
+            {
+                return Debugger{m_entities, m_storages};
             }
 
             /**
              * Gets the entity's location info.
-             * 
-             * TODO: Separate into specific functions for index, state, id_locked and type. 
              */
             auto info(EntityId id) -> const EntityInfo& 
             {
@@ -1475,20 +1416,16 @@ namespace NECS
             }
             
             /**
-             * TODO: update documentation at some point.
-             */
-            auto debugger()
-            {
-                return Debugger{m_entities, m_storages};
-            }
-
-            /**
-             * TODO: check if necessary.
+             * Returns a read-only reference to the ids of a pool.
+             * 
+             * @tparam A The storage to get the pool from.
+             * 
+             * @param sleeping_pool Whether to get the sleeping pool or not.
              */
             template <typename A>
             auto ids(bool sleeping_pool = false) -> const std::vector<EntityId>&
             {
-                return storage<A>().pool(sleeping_pool).ids();
+                return pool<A>(sleeping_pool).ids();
             }
 
             /**
@@ -1505,34 +1442,51 @@ namespace NECS
             }
 
             /**
-             * Gets a single query.
-             * Initializes and updates the query, prepares it for the
-             * correct pool.
+             * Constructs a single query.
              * 
-             * @tparam Q The query to retrieve. This must be a Query class.
+             * @tparam Cs... The components to query for.
              * 
              * @param sleeping_pool False by default, updates the query
              * for the sleeping pool if true, living pool if false. 
              * 
-             * @returns A reference to the query. Copy the query if
-             * a nested query is desired.
+             * @returns A query object.
              */
-            // template <typename Q>
-            // auto query(bool sleeping_pool = false) -> Q&
-            // {
-            //     auto& q = std::get<Q>(m_queries);
-
-            //     q.toggle_pool(sleeping_pool);
-
-            //     return q;
-            // }
-
             template <typename... Cs>
             auto query(bool sleeping_pool = false) -> Query<Cs...>
             {
                 return Query<Cs...>(match<Data<Cs...>>(), sleeping_pool);
             }
 
+            /**
+             * Constructs an iterator for a single pool.
+             * 
+             * @tparam A The archetype storage to check. 
+             * @tparam Cs... The components to filter for. 
+             * 
+             * @param sleeping_pool False by default, iterates the
+             * sleeping pool if true, living pool if false.              
+             *  
+             * @returns The pool's iterator.
+             */
+            template <typename A, typename... Cs>
+            auto query_in(bool sleeping_pool = false) -> Iterator<Cs...>
+            {
+                return storage<A>().template iter<Cs...>(sleeping_pool);
+            }
+
+            /**
+             * Constructs a query with additional component constraints using `With`.
+             * Expands `With` into its constituent components and includes them in the match.
+             * 
+             * @tparam With A `Data<>` wrapper containing components to include in the match.
+             * @tparam Cs... The primary components to query for. This must be a set of 
+             * Query-compatible types.
+             * 
+             * @param sleeping_pool False by default, updates the query
+             * for the sleeping pool if true, living pool if false.
+             * 
+             * @returns A query including components from `With`.
+             */
             template <typename With, typename... Cs>
             auto query_with(bool sleeping_pool = false) -> Query<Cs...>
             {
@@ -1543,12 +1497,37 @@ namespace NECS
                 (With{});
             }
 
+            /**
+             * Constructs a query excluding specific components defined in `Without`.
+             * 
+             * @tparam Without A `Data<>` wrapper containing components to exclude from the match.
+             * @tparam Cs... The primary components to query for. This must be a set of 
+             * Query-compatible types.
+             * 
+             * @param sleeping_pool False by default, updates the query
+             * for the sleeping pool if true, living pool if false.
+             * 
+             * @returns A query excluding components from `Without`.
+             */
             template <typename Without, typename... Cs>
             auto query_without(bool sleeping_pool = false) -> Query<Cs...>
             {
                 return Query<Cs...>(match<Data<Cs...>, Without>(), sleeping_pool);
             }
 
+            /**
+             * Constructs a query including components from `With` and excluding those from `Without`.
+             * Expands `With` into its components and combines it with the exclusion from `Without`.
+             * 
+             * @tparam With A `Data<>` wrapper containing components to include.
+             * @tparam Without A `Data<>` wrapper containing components to exclude.
+             * @tparam Cs... The primary components to query for. This must be a set of Query-compatible types.
+             * 
+             * @param sleeping_pool False by default, updates the query
+             * for the sleeping pool if true, living pool if false.
+             * 
+             * @returns A query with included and excluded components.
+             */
             template <typename With, typename Without, typename... Cs>
             auto query_with_without(bool sleeping_pool = false) -> Query<Cs...>
             {
@@ -1659,24 +1638,9 @@ namespace NECS
 
                 return v;
             }
-
-            /**
-             * Constructs an iterator for a single pool.
-             * 
-             * @tparam A The archetype storage to check. 
-             * @tparam Cs... The components to filter for. 
-             * 
-             * @param sleeping_pool False by default, iterates the
-             * sleeping pool if true, living pool if false.              
-             *  
-             * @returns The pool's iterator.
-             */
-            template <typename A, typename... Cs>
-            auto iter(bool sleeping_pool = false) -> Iterator<Cs...>
-            {
-                return storage<A>().template iter<Cs...>(sleeping_pool);
-            }
             
+            // ---- Create ---- //
+
             /**
              * Creates an entity.
              * Create operations change memory instantly for their affected pool.
@@ -1704,27 +1668,6 @@ namespace NECS
                 s.living.add(id, entity);
 
                 data.update = [this, id] () { apply<A>(id); };
-
-                data.ref = [this, id] ()
-                {
-                    return [this, &id]<typename... Cs>(Data<Cs...>)
-                    {
-                        auto& i = info(id);
-
-                        if (i.state == DEAD)
-                        {
-                            return EntityRef(std::type_index(typeid(A)));
-                        }
-                        else 
-                        {
-                            Data<Cs&...> e = storage<A>().template get<Cs...>
-                            (i.index, (i.state == SLEEPING || i.state == AWAKE));
-
-                            return EntityRef(e);
-                        }
-                    }
-                    (A{});
-                };
     
                 if (m_run_callbacks) 
                 {
@@ -1753,41 +1696,13 @@ namespace NECS
                 }
             }
 
+            // ---- Memory management ---- //
+
             /**
-             * A dynamic alternative to queries.
-             * Iterates through all the storages in the system that match the components.
+             * Trims dead memory from the end of each pool.
              * 
-             * @tparam Cs... The components to filter for. 
-             * @tparam Callback Must be invocable<EntityId, Data<Cs&...>.
-             * 
-             * @param callback The callback to execute for each entity.
-             * @param sleeping_pool False by default, iterates the
-             * sleeping pool if true, living pool if false.   
-             * 
-             * @throws Callback is not invocable<EntityId, Data<Cs&...>.
-             *              
+             * @tparam A The storage to trim.
              */
-            template <typename... Cs, typename Callback>
-            void for_each(Callback&& callback, bool sleeping_pool = false)
-            {
-                static_assert(std::is_invocable_v<Callback, Extraction<Cs...>>, "For each callback must take Extraction<Cs...> as argument.");
-
-                [this, &callback, &sleeping_pool]<typename... As>(Data<Storage<As>&...> storages)
-                {
-                    auto f = [this, &callback, &sleeping_pool]<typename A>(Storage<A>& s)
-                    {
-                        for (auto extraction : s.template iter<Cs...>(sleeping_pool)) 
-                        {
-                            callback(extraction);
-                        }
-                    };
-
-                    (f(std::get<Storage<As>&>(storages)),...);
-                }
-                (match<Data<Cs...>>());
-            }
-           
-            // Trims dead memory from the end of each pool.
             template <typename A>
             void trim()
             {
@@ -1796,47 +1711,14 @@ namespace NECS
                 s.sleeping.trim();
             }
 
-            /**
-             * Adds a callback to an event listener.
-             * 
-             * @tparam E The event of the listener. 
-             * @tparam Callback invocable<E>. 
-             * 
-             * @param callback The function to call for this event.
-             * 
-             * @throws Callback is not invocable<E>. 
-             */
-            template <typename E, typename Callback>
-            void subscribe(Callback&& callback)
-            {
-                listener<E>().subscribe(callback);
-            }
+            // ---- State management ---- //
 
             /**
-             * Marks a callback as not ready.
+             * Updates all the entities queued by queue().
              * 
-             * @tparam E The event of the listener.
+             * The entities will be update in the order of ther addition to the 
+             * queue. Double-entities will be skipped due to state tracking.
              */
-            template <typename E>
-            void unsubscribe()
-            {
-                listener<E>().unsubscribe();
-            }
-
-            /**
-             * Calls the listener callback for this event.
-             * 
-             * @tparam E The event of the listener.
-             * 
-             * @param event The event to pass to the callback.
-             */
-            template <typename E>
-            void call(E event)
-            {
-                listener<E>().call(event);
-            }
-
-            // Updates all queued entities in the system.
             void update()
             {
                 m_entities.update();
@@ -1874,5 +1756,15 @@ namespace NECS
             {
                 m_entities.execute(id, task);
             }
+            
+
+            // ---- Toggle ---- //
+
+            // Toggles whether internal callbacks should be called.
+            void toggle_callbacks(bool value)
+            {
+                m_run_callbacks = value;
+            };
+            
     };
 };

@@ -38,41 +38,6 @@ void benchmark_create()
     }, 1);
 }
 
-void benchmark_for_each()
-{
-    benchmark("For each name: ", [](){
-        reg.for_each<Name>
-        ([](Extraction<Name> e){
-            auto& [id, data] = e;
-
-            auto& [name] = data;
-
-            name.value = "F";
-        });
-    });
-
-    benchmark("For each name & pos: ", [](){
-        reg.for_each<Name, Position>
-        ([](Extraction<Name, Position> e){
-            auto& [id, data] = e;
-            auto& [name, position] = data;
-            name.value = "F";
-            position.x++;
-        });
-    });
-
-    benchmark("For each name, pos & health: ", [](){
-        reg.for_each<Name, Position, Health>
-        ([](Extraction<Name, Position, Health> e){
-            auto& [id, data] = e;
-            auto& [name, position, health] = data;
-            name.value = "F";
-            position.x++;
-            health.value++;
-        });
-    });
-}
-
 void benchmark_query()
 {    
     benchmark("1-component query ", [](){
@@ -106,7 +71,7 @@ void benchmark_query()
 void benchmark_iter()
 {
     benchmark("1-component iter: ", [](){
-        for (auto [id, data] : reg.iter<A3, Health>())
+        for (auto [id, data] : reg.query_in<A3, Health>())
         {
             auto& [health] = data;
             health.value++;
@@ -114,7 +79,7 @@ void benchmark_iter()
     });
 
     benchmark("2-component iter: ", [](){
-        for (auto [id, data] : reg.iter<A3, Health, Position>())
+        for (auto [id, data] : reg.query_in<A3, Health, Position>())
         {
             auto& [health, pos] = data;
             health.value++;
@@ -123,7 +88,7 @@ void benchmark_iter()
     });
 
     benchmark("3-component iter: ", [](){
-        for (auto [id, data] : reg.iter<A3, Health, Position, Name>())
+        for (auto [id, data] : reg.query_in<A3, Health, Position, Name>())
         {
             auto& [health, pos, name] = data;
             health.value++;
@@ -241,26 +206,8 @@ void benchmark_find()
     });
 }
 
-void benchmark_ref()
-{
-    auto& ids = reg.ids<A3>();
-
-    benchmark("Ref: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto ref = reg.ref(id);
-
-            auto [health, pos, name] = ref.get<A3>();
-            health.value++;
-            pos.x++; 
-            name.value = "F";
-        }
-    });
-}
-
 int main(int argc, char* argv[])
 {
-
     if (argc < 2) {
         std::cerr << "Usage: benchmarks.exe <int>\n";
         return 1;
@@ -271,13 +218,11 @@ int main(int argc, char* argv[])
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
     benchmark_create();
-    benchmark_for_each();
     benchmark_query();
     benchmark_iter();
     benchmark_get();
     benchmark_view();
     benchmark_find();
-    benchmark_ref();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

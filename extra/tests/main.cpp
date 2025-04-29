@@ -50,23 +50,6 @@ auto test_find(EntityId id) -> Data<Cs&...>
     return find.value();
 }
 
-template <typename A>
-auto test_ref(EntityId id)
-{
-    EntityRef ref = reg.ref(id);
-
-    if (!ref.is_type<A>())
-    {
-        throw std::runtime_error("Ref with incorrect type.");
-    }
-    else if (ref.is_empty())
-    {
-        throw std::runtime_error("Ref empty.");
-    }
-
-    return ref.get<A>();
-}
-
 void test_create()
 {
     EntityId id = reg.create(A3(Health{10}, Position{1, 4}, Name{"First"}));
