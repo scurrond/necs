@@ -228,7 +228,6 @@ namespace NECS
     template <typename... Cs> 
     using View = std::optional<Data<Cs&...>>;
 
-
     // ----------------------------------------------------------------------------
     // Entity
     // ---------------------------------------------------------------------------- 
@@ -298,6 +297,8 @@ namespace NECS
     /**
      * Entity metadata manager class. 
      * Contains type-erased data and manages EntityId allocations.
+     * 
+     * Each EntityId is a fixed index in its data array.
      * 
      * It is always called on internally and is not exposed. 
      */
@@ -1259,6 +1260,19 @@ namespace NECS
             {
                 auto& i = info(id);
                 return i.state == state;
+            }
+
+            /**
+             * Checks if an entity's id has been locked (removed from reuse).
+             * 
+             * @param id The entity to check.
+             * 
+             * @returns The entity's id_locked status.
+             */
+            bool is_locked(EntityId id)
+            {
+                auto& i = info(id);
+                return i.is_locked;
             }
 
             /**

@@ -63,7 +63,7 @@ void create()
     registry.populate(Monster(), 100);
 };
 
-void change()
+void manage()
 {
     // Changes data after update is called
     registry.queue(0, KILL);
@@ -92,6 +92,9 @@ void check()
 
     // is the entity with id 0 dead
     registry.is_state(0, DEAD);
+
+    // can the entity's id be reused on death
+    registry.is_locked(0);
 }
 
 void access()
