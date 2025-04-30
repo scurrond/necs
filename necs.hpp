@@ -292,6 +292,7 @@ namespace NECS
     {
         EntityInfo info; // Location data on the entity inside of its storage.
         std::function<void()> update = {};
+        std::function<bool(std::type_index)> has_component = {};
     };
 
     /**
@@ -624,12 +625,6 @@ namespace NECS
         std::vector<EntityId> m_ids;
 
         template <typename C>
-        auto vector() -> std::vector<C>&
-        {
-            return std::get<std::vector<C>>(m_data);
-        }
-
-        template <typename C>
         void push(C& component)
         {
             vector<C>().push_back(component);
@@ -703,6 +698,12 @@ namespace NECS
                 return m_ids;
             }
 
+            template <typename C>
+            auto vector() -> std::vector<C>&
+            {
+                return std::get<std::vector<C>>(m_data);
+            }
+
             auto get(size_t index)
             {
                 return [this, &index]<typename... Cs>(Data<Cs...>)
@@ -763,11 +764,33 @@ namespace NECS
     // ---------------------------------------------------------------------------- 
 
     /**
+     * Storage metadata. 
+     * Contains a map of component -> bool. 
+     */
+    struct StorageInfo
+    {
+        // false by default
+        std::unordered_map<std::type_index, bool> components;
+        
+        template <typename... Cs>
+        StorageInfo(Data<Cs...> entity)
+        {
+            auto f = [this]<typename C>(C)
+            {
+                components[std::type_index(typeid(C))] = true;
+            };
+            (f(std::get<Cs>(entity)),...);
+        }
+    };
+
+    /**
      * Top-level archetype container. 
      * 
      * Each storage contains a living and sleeping pool, as well as functions for 
      * interacting with them. It also has some functions for applying updates to 
      * an entity's state.
+     * 
+     * Contains a map of component type_index -> bool.
      * 
      * @tparam A The archetype of this storage.
      */
@@ -776,6 +799,7 @@ namespace NECS
     {
         Pool<A> living;
         Pool<A> sleeping;
+        StorageInfo info = StorageInfo(A{});
 
         template <typename... Cs>
         auto get(size_t index, bool sleeping_pool) -> Data<Cs&...>
@@ -1292,6 +1316,14 @@ namespace NECS
                 return pool_count<A>(sleeping_pool) == 0;
             }
 
+            template <typename C>
+            bool has_component(EntityId id)
+            {
+                auto& i = info(id);
+
+                return i.has_component(std::type_index(typeid(C)));
+            }
+
             // ---- Counters ---- //
 
             /**
@@ -1325,7 +1357,7 @@ namespace NECS
             template <typename A>
             size_t pool_total(bool sleeping_pool = false)
             {
-                return pool<A>().total();
+                return pool<A>(sleeping_pool).total();
             }
 
             /**
@@ -1339,7 +1371,7 @@ namespace NECS
             template <typename A>
             size_t pool_count(bool sleeping_pool = false)
             {
-                return pool<A>().count();
+                return pool<A>(sleeping_pool).count();
             }
  
             // ---- Events ---- //
@@ -1371,10 +1403,10 @@ namespace NECS
              * @tparam E The event of the listener.
              */
             template <typename E>
-            void unsubscribe()
+            void close()
             {
                 auto& l = listener<E>();
-                l.ready = false;
+                if (l.set) l.ready = false;
             }
 
             /**
@@ -1383,10 +1415,10 @@ namespace NECS
              * @tparam E The event of the listener.
              */
             template <typename E>
-            void resubscribe()
+            void open()
             {
                 auto& l = listener<E>();
-                if (l.set) l.ready = false;
+                if (l.set) l.ready = true;
             }
 
             /**
@@ -1429,6 +1461,7 @@ namespace NECS
                 return m_entities.data[id].info;
             }
             
+
             /**
              * Returns a read-only reference to the ids of a pool.
              * 
@@ -1440,6 +1473,15 @@ namespace NECS
             auto ids(bool sleeping_pool = false) -> const std::vector<EntityId>&
             {
                 return pool<A>(sleeping_pool).ids();
+            }
+
+            /**
+             * Returns a read-only vector of components from a pool.
+             */
+            template <typename A, typename C>
+            auto vector(bool sleeping_pool = false) -> const std::vector<C>&
+            {
+                return pool<A>(sleeping_pool).template vector<C>();
             }
 
             /**
@@ -1682,6 +1724,14 @@ namespace NECS
                 s.living.add(id, entity);
 
                 data.update = [this, id] () { apply<A>(id); };
+
+                data.has_component = [this] (std::type_index type)
+                {
+                    Storage<A>& s = storage<A>();
+
+                    // this will insert a component type as false by default
+                    return s.info.components[type];
+                };
     
                 if (m_run_callbacks) 
                 {
