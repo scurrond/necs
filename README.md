@@ -99,11 +99,17 @@ struct Health
 using Monster = Data<Position, Name, Health>;
 
 // ----------------------------------------------------------------------------
+// Events
+// ----------------------------------------------------------------------------
+
+struct QuitEvent {};
+
+// ----------------------------------------------------------------------------
 // Registry data
 // ----------------------------------------------------------------------------
 
 using Archetypes = Data<Monster>;
-using Events = Data<>;
+using Events = Data<QuitEvent>;
 using Singletons = Data<>;
 
 Registry<Archetypes, Events, Singletons> registry;
@@ -136,6 +142,46 @@ void create()
 }
 ```
 
+## Events
+
+```cpp
+void events()
+{
+    // Subscribe to built in component events
+    registry.subscribe<DataUpdated<Name>>
+    ([](DataUpdated<Name> event){
+        // do stuff
+    });
+
+    // Subscribe to built in archetype events
+    registry.subscribe<DataUpdated<Monster>>
+    ([](DataUpdated<Monster> event){
+        // do stuff
+    });
+
+    // Subscribe to built in entity events
+    registry.subscribe<EntityCreated>
+    ([](EntityCreated event){
+        // do stuff
+    });
+
+    // Subscribe to custom events
+    registry.subscribe<QuitEvent>
+    ([](QuitEvent event){
+        // do stuff
+    });
+
+    // Call events
+    registry.call(QuitEvent{});
+
+    // Disable event listener
+    registry.close<QuitEvent>();
+
+    // Enable event listener
+    registry.open<QuitEvent>();
+}
+```
+
 ## Checking
 
 ```cpp
@@ -158,6 +204,9 @@ void check()
 
     // can the entity's id be reused on death
     registry.is_locked(0);
+
+    // does the entity have a name component
+    registry.has_component<Name>(0);
 }
 ```
 
