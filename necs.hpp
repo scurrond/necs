@@ -1319,9 +1319,9 @@ namespace NECS
             template <typename C>
             bool has_component(EntityId id)
             {
-                auto& i = info(id);
+                auto& data = m_entities.data[id];
 
-                return i.has_component(std::type_index(typeid(C)));
+                return data.has_component(std::type_index(typeid(C)));
             }
 
             // ---- Counters ---- //

@@ -110,6 +110,13 @@ void test_populate()
     reg.populate(A3(), 3);
 }
 
+void test_has_component()
+{
+    bool v = reg.has_component<Name>(0);
+
+    std::cout << "\nEntity 0 has Name: " << v << "\n";
+}
+
 int main()
 {
     std::cout << "=== Running tests ===\n";
@@ -118,6 +125,7 @@ int main()
     test_query();
     test_populate();
     test_query();
+    test_has_component();
     std::cout << "=== Run succeeded ===\n";
 
     return 0;
