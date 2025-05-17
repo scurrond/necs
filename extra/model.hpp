@@ -1,12 +1,14 @@
 #pragma once 
 
 #include "../necs.hpp"
+#include "../ecs.hpp"
 
 using namespace NECS;
 
 // COMPONENTS
 
 struct Health { int value; };
+struct Detector { int target; };
 struct Position { float x; float y; };
 struct Name { std::string value; };
 

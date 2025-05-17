@@ -145,12 +145,12 @@ namespace NECS
             typename Tuple, 
             std::size_t I, 
             std::size_t... Is, 
-            typename... WithTs, 
+            typename... Ws, 
             typename... WithoutTs>
         struct match_index
         <
             Tuple, std::index_sequence<I, Is...>, 
-            std::tuple<WithTs...>, 
+            std::tuple<Ws...>, 
             std::tuple<WithoutTs...>
         > 
         {
@@ -158,14 +158,14 @@ namespace NECS
             <
                 Tuple, 
                 std::index_sequence<Is...>, 
-                std::tuple<WithTs...>, 
+                std::tuple<Ws...>, 
                 std::tuple<WithoutTs...>
             >::type;
 
             using CurrentTuple = std::tuple_element_t<I, Tuple>;
 
             static constexpr bool match =
-                has_all_types<CurrentTuple, WithTs...>::value &&
+                has_all_types<CurrentTuple, Ws...>::value &&
                 !has_any_type<CurrentTuple, WithoutTs...>::value;
 
             using type = std::conditional_t
@@ -828,9 +828,12 @@ namespace NECS
     // Query
     // ---------------------------------------------------------------------------- 
 
+
     /**
      * Main iterator class containing references to all the matching storages
      * in the system.
+     * 
+     * TODO: return to templated queries with a lambda approach.
      */
     template <typename... Cs>
     class Query

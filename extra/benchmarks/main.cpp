@@ -38,6 +38,71 @@ void benchmark_create()
     }, 1);
 }
 
+void benchmark_new()
+{
+    using Monster = necs::Archetype<Position, Health, Detector>;
+    using Tree = necs::Archetype<Position, Health>;
+
+    using As = necs::Data<Monster, Tree>;
+    using Matched = necs::filter::match_index<As, std::make_index_sequence<std::tuple_size_v<As>>, Data<const Position, Detector>, Data<>>::type;
+
+    necs::Storages<Tree, Monster> storages;
+
+    auto& monster_storage = std::get<1>(storages);
+
+    benchmark("Create 3 components:", [&monster_storage](){
+        for (int i = 0; i < entity_count; i++)
+        {
+            monster_storage.create(Monster());
+        }
+    }, 1);
+
+    auto single_iter = monster_storage.iter<Health>();
+    auto double_iter = monster_storage.iter<Health, Position>();
+
+    benchmark("1-component iter: ", [&single_iter](){
+        for (auto [h] : single_iter)
+        {
+            h.value++;
+        }
+    });
+
+    benchmark("2-component iter: ", [&double_iter](){
+        for (auto [h, p] : double_iter)
+        {
+            h.value++;
+            p.x++;
+        }
+    });
+    
+   necs::Query<necs::For<Position>> single_query(storages);
+   necs::Query<necs::For<Position, Health>> double_query(storages);
+   necs::Query<necs::For<Position, Health, const Detector>> triple_query(storages);
+
+    benchmark("1-component query ", [&single_query](){
+        for (auto [pos] : single_query)
+        {
+            pos.x++;
+        }
+    });
+
+    benchmark("2-component query ", [&double_query](){
+        for (auto  [pos, health]  : double_query)
+        {
+            pos.x++;
+            health.value++;
+        }
+    });
+
+    benchmark("3-component query ", [&triple_query](){
+        for (auto [pos, health, detector] : triple_query)
+        {
+            pos.x++;
+            health.value++;
+        }
+    });
+}
+
 void benchmark_query()
 {    
     benchmark("1-component query ", [](){
@@ -63,7 +128,6 @@ void benchmark_query()
             auto& [health, pos, name] = data;
             health.value++;
             pos.x++;
-            name.value = "F";
         }
     });
 }
@@ -218,11 +282,15 @@ int main(int argc, char* argv[])
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
     benchmark_create();
-    benchmark_query();
     benchmark_iter();
-    benchmark_get();
-    benchmark_view();
-    benchmark_find();
+    benchmark_query();
+    // benchmark_get();
+    // benchmark_view();
+    // benchmark_find();
+ 
+    benchmark_new();
+
+
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

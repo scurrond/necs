@@ -117,6 +117,39 @@ void test_has_component()
     std::cout << "\nEntity 0 has Name: " << v << "\n";
 }
 
+void test_pool()
+{
+    necs::Pool<Position> pool;
+}
+
+void test_storage()
+{
+    
+    using Snake = necs::Archetype<Position, Health>;
+    necs::Storage<Snake> storage;
+}
+
+void test_iterator()
+{
+    necs::Pool<Position> pool;
+
+    Position pos1;
+    Position pos2;
+    Position pos3;
+    size_t end = 3;
+
+    pool.push(pos1);
+    pool.push(pos2);
+    pool.push(pos3);
+
+    necs::QueryIterator<Position> iter(end, pool.data);
+
+    size_t counter = 0; 
+
+
+    std::cout << "Counter: " << counter << "\n";
+}
+
 int main()
 {
     std::cout << "=== Running tests ===\n";
@@ -125,7 +158,10 @@ int main()
     test_query();
     test_populate();
     test_query();
-    test_has_component();
+
+    test_pool();
+    test_storage();
+    test_iterator();
     std::cout << "=== Run succeeded ===\n";
 
     return 0;
