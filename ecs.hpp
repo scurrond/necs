@@ -20,9 +20,6 @@ namespace necs
     // Filters
     // ----------------------------------------------------------------------------
 
-    /**
-     * Internal namespace containing structs for filtering tuples.
-     */
     namespace filter
     {
         template<typename... Tuples>
@@ -183,18 +180,17 @@ namespace necs
         using Match = match_index<Tuple, std::make_index_sequence<std::tuple_size_v<Tuple>>, With, Without>::type;
     };
 
-    template <typename... Cs> // Filters & extracts select components.
+    template <typename... Cs>
     struct For {};
-    template <typename... Cs> // Includes arhcetypes with select components.
+    template <typename... Cs> 
     struct With {};
-    template <typename... Cs> // Excludes archetypes with select components.
+    template <typename... Cs>
     struct Without {};
 
     // ----------------------------------------------------------------------------
     // Basic definitions & aliases 
     // ----------------------------------------------------------------------------
 
-    using Id = size_t; // Reusable unique identifier alias. 
     using Type = std::type_index; // std::type_index alias.
     using Any = std::any; // std::any alias.
     using Error = std::runtime_error; // std::runtime_error alias.
@@ -210,100 +206,130 @@ namespace necs
     using Option = std::optional<T>; 
     template <typename K, typename V> // Map alias
     using Map = std::unordered_map<K, V>;
-
-    // ----------------------------------------------------------------------------
-    // Archetype
-    // ----------------------------------------------------------------------------
-
-    /** 
-     * Alias for archetypes including entity ids.
-     * Used to register archetypes in the registry to be able to query for ids.
-     */
-    template <typename... Cs>
-    using Archetype = Data<Id, Cs...>;
-
-    /**
-     * Type-erased archetype data.
-     * Used for component checks and lookups when all we have is the entity id.
-     * Initiated by the Registry.
-     */
-    struct Archetypes
-    {
-        // udpate calls per archetype storage 
-        Map<Type, Func<void, Id>> update; 
-        // type-erased references to storages 
-        Map<Type, Any> storage;
-        // inserts false by default, maintains 01 checks
-        Map<Type, Map<Type, bool>> has; 
-        // gets a pool reference if it exists, never insert
-        Map<Type, Map<Type, Any>> pool; 
+    template <typename T, template <typename...> class OuterWrapper, template <typename> class InnerWrapper>
+    struct WrapData;
+    template <template <typename...> class OuterWrapper, template <typename> class InnerWrapper, typename... Ts>
+    struct WrapData<Data<Ts...>, OuterWrapper, InnerWrapper> {
+        using type = OuterWrapper<InnerWrapper<Ts>...>;
     };
+
+    template <typename T>
+    auto GetType() -> Type
+    {
+        return std::type_index(typeid(T));
+    }
     
     // ----------------------------------------------------------------------------
     // Entities
     // ----------------------------------------------------------------------------
 
-    /**
-     * Entity metadata storage.
-     * Contains information on the entity's location & status at the index (id) of an 
-     * entity. Contains state management data.
-     */
+    using EntityId = size_t; 
+
     struct Entities 
     {
-        // ---- State management ---- //
-
         size_t total;
+        size_t living_count;
+        size_t dead_count;
 
-        Vec<Id> to_reuse; // Ids to reuse.
-        Vec<Id> to_remove; // Entities to remove on next update.
-
-        // ---- Entity data ---- //
+        Vec<EntityId> to_reuse; // Ids to reuse.
+        Vec<EntityId> to_remove; // Entities to remove on next update.
 
         Vec<Type> type; // Entity storage type.
         Vec<bool> alive; // Living status.
         Vec<bool> locked; // Id can be reused after death.
         Vec<size_t> index; // Storage index pointer.
+
+        auto create(Type t, size_t i) -> EntityId
+        {
+            EntityId id = 0;
+
+            if (to_reuse.size() == 0)
+            {
+                id = total;
+
+                type.push_back(t);
+                alive.push_back(true);
+                locked.push_back(false);
+                index.push_back(i);
+
+                total++;
+            }
+            else 
+            {
+                id = to_reuse.back();
+
+                type[id] = t;
+                alive[id] = true;
+                locked[id] = false;
+                index[id] = i;
+
+                to_reuse.pop_back();
+                dead_count--;
+            }
+
+            living_count++;
+            return id;
+        }
     };  
+
+    // ----------------------------------------------------------------------------
+    // Archetype
+    // ----------------------------------------------------------------------------
+
+    template <typename... Cs>
+    using Archetype = Data<EntityId, Cs...>;
+
+    struct Archetypes
+    {
+        Map<Type, Any> storage;
+        Map<Type, Map<Type, Any>> pool; 
+        Map<Type, Map<Type, bool>> has; 
+        Map<Type, Func<void, EntityId, bool>> update; 
+    };
+
+    // ----------------------------------------------------------------------------
+    // Item
+    // ----------------------------------------------------------------------------
+
+    template <typename... Cs>
+    using Item = Data
+    <
+        std::conditional_t
+        <
+            std::is_same_v<Cs, EntityId>,
+            const Cs&, Cs&
+        >...
+    >;
 
     // ----------------------------------------------------------------------------
     // Pool
     // ----------------------------------------------------------------------------
 
-    /**
-     * Stores a single vector of components. 
-     * Data viability and checks are managed by the Storage that contains it.
-     * @tparam C The type of component stored in the pool.
-     */
     template <typename C>
-    struct Pool 
+    struct Pool
     {
         Vec<C> data;
 
-        // Expands the underlying data vector.
         void push(C& component)
         {
             data.push_back(component);
         }
 
-        // Overwrites some data in the vector.
         void insert(C& component, size_t index)        
         {
             data[index] = component;
         }
 
-        // Erases all data after an index.
         void erase(size_t start_index)
         {
             data.erase(data.begin() + start_index, data.end());
         }
 
-        // Swaps the contents of the vector.
         void swap(size_t index_1, size_t index_2)
         {
             std::swap(data[index_1], data[index_2]);
         }
 
-        // Clears all component data.
         void clear()
         {
             data.clear();
@@ -314,9 +340,6 @@ namespace necs
     // Chunk
     // ----------------------------------------------------------------------------
 
-    /**
-     * References to a storage's component vectors and last living entity.
-     */
     template <typename... Cs>
     struct Chunk 
     {
@@ -331,14 +354,7 @@ namespace necs
 
         auto get(size_t index) -> Data<Cs&...>
         {
-            if (index >= end) 
-            {
-                throw Error("@IterItem::get - index out of bounds.");
-            }
-            else 
-            {
-                return std::tie<Cs...>((vec<Cs>()[index])...);
-            }
+            return std::tie<Cs...>((vec<Cs>()[index])...);
         }
     };
 
@@ -346,142 +362,162 @@ namespace necs
     // Storage
     // ----------------------------------------------------------------------------
 
-    template <typename... Cs>
-    struct StorageIterator
-    {          
-        size_t current = 0;
-        Chunk<Cs...> item;
-
-        StorageIterator(Chunk<Cs...> _item)
-        :  item(_item) {}
-
-        bool operator!=(const StorageIterator<Cs...>& other) const 
-        {
-            return current != other.current;
-        }
-
-        auto operator*() -> Data<Cs&...>
-        {
-            return item.get(current);
-        }
-
-        StorageIterator<Cs...>& operator++() 
-        {
-            ++current;
-            return *this;            
-        }
-
-        StorageIterator<Cs...>& begin() 
-        {
-            current = 0;
-            return *this;            
-        }
-
-        StorageIterator<Cs...>& end() 
-        {
-            current = item.end;
-            return *this;            
-        }
-    };
-
     template <typename A>
-    struct Storage;
-
-    /**
-     * Base storage, templated for a single archetype.
-     * Storages live for the entire duration of the Registry's lifetime.
-     * 
-     * @tparam Cs... The Data<Cs...> must be a valid Archetype with unique components.
-     */
-    template <typename... Cs>
-    struct Storage<Data<Cs...>>
+    class Storage
     {
-        using First = std::decay_t<decltype(std::get<0>(Data<Cs...>{}))>;
-        static_assert(std::is_same_v<First, Id>, "@Storage - template data must be a valid Archetype containing an Id.");
-        using Components = filter::merge_types<Data<Cs...>>::type;
-        static_assert(std::is_same_v<Components, Data<Cs...>>, "@Storage - components must not repeat.");
-        using StorageData = Data<Pool<Cs>...>;
+        using First = std::decay_t<decltype(std::get<0>(A{}))>;
+        static_assert(std::is_same_v<First, EntityId>, "@Storage - template data must be a valid Archetype containing an Id.");
+        using Components = filter::merge_types<A>::type;
+        static_assert(std::is_same_v<Components, A>, "@Storage - components must not repeat.");
+        using StorageData = WrapData<A, Data, Pool>::type;
 
-        size_t end = 0; // last living entity + 1
-        size_t total = 0; // data capacity
-        StorageData data; // component vectors
-
-        template <typename C>
-        auto pool() -> Pool<C>&
-        {
-            static_assert(
-                filter::has_type<C, Data<Cs...>>{}, 
-                "@Storage::get - The requested pool is not inside this Storage."
-            );
-            return std::get<Pool<C>>(data);
-        }
-
-        template <typename C>
-        auto vec() -> VecRef<C>
-        {
-            return pool<std::remove_const_t<C>>().data;
-        }
-
-        template <typename... Ts>
-        auto item() -> Chunk<Ts...>
-        {
-            static_assert(filter::has_all_types<Data<Cs...>, Ts...>::value, "@Storage::item - Types to iter must be present in storage.");
-
-            return {end, std::tie((vec<Ts>())...)};
-        }
-
-        template <typename... Ts>
-        auto iter() -> StorageIterator<Ts...>
-        {
-            static_assert(filter::has_all_types<Data<Cs...>, Ts...>::value, "@Storage::iter - Types to iter must be present in storage.");
-
-            return StorageIterator<Ts...>(item<Ts...>());
-        }
-
-        auto remove(size_t index) -> Id 
-        {
-            if (index >= end)
+        size_t m_end = 0;
+        size_t m_total = 0;
+        StorageData m_data;
+        
+        public: 
+            template <typename C>
+            auto get_pool() -> Pool<C>&
             {
-                throw Error("@Storage::remove - the index is out of bounds.");
+                static_assert(
+                    filter::has_type<C, A>{}, 
+                    "@Storage::get_pool - The requested pool is not inside this Storage."
+                );
+            
+                return std::get<Pool<C>>(m_data);
+            }
+
+            template <typename C>
+            auto get_vec() -> VecRef<C>
+            {
+                return get_pool<std::remove_const_t<C>>().data;
+            }
+
+            template <typename... Cs>
+            auto get_chunk() -> Chunk<Cs...>
+            {
+                return {m_end, std::tie((get_vec<Cs>())...)};
+            }
+
+            auto get_total() -> const size_t&
+            {
+                return m_total;
+            }
+
+            auto get_count() -> const size_t&
+            {
+                return m_end;
+            }
+
+            template <typename C>
+            auto get_component(size_t index) ->  C&
+            {
+                return get_vec<C>()[index];
+            }
+
+            template <typename... Cs>
+            auto get_components(size_t index) -> Data<Cs&...>
+            {
+                return std::tie(get_component<Cs>(index)...);
+            }
+
+            template <typename... Cs>
+            void create(Data<Cs...> entity)
+            {
+                if (m_end == m_total)
+                {
+                    (get_pool<Cs>().push(std::get<Cs>(entity)),...);
+                    m_total++;
+                }
+                else 
+                {
+                    (get_pool<Cs>().insert(std::get<Cs>(entity), m_end),...);
+                }
+
+                m_end++;
+            }
+
+            auto remove(size_t index) -> EntityId 
+            {
+                [this, &index]<typename... Cs>(Data<Cs...>)
+                {
+                    (get_pool<Cs>().swap(index, m_end - 1),...);
+                    m_end--;
+                }
+                (A{});
+
+                return get_vec<EntityId>()[index];
+            }
+
+            void trim()
+            {
+                if (m_end < m_total)
+                {
+                    [this]<typename... Cs>(Data<Cs...>)
+                    {
+                        (get_pool<Cs>().erase(m_end),...);
+                        m_total -= m_total - m_end;
+                    }
+                    (A{});
+                }
+            }
+
+            void clear()
+            {
+                [this]<typename... Cs>(Data<Cs...>)
+                {
+                    (get_pool<Cs>().clear(),...);
+                    m_end = 0;
+                    m_total = 0;
+                }
+                (A{});
+            }
+
+            template <typename... Cs>
+            auto iter()
+            {
+                return iterator<Cs...>(get_chunk<Cs...>());
+            }
+
+            template <typename... Cs>
+            class iterator 
+            {
+                size_t current = 0;
+                Chunk<Cs...> chunk;
+
+                public: 
+                    iterator(Chunk<Cs...> _chunk)
+                    :  chunk(_chunk) {}
+
+                    bool operator!=(const iterator<Cs...>& other) const 
+                    {
+                        return current != other.current;
+                    }
+
+                    auto operator*() -> Item<Cs...>
+                    {
+                        return chunk.get(current);
+                    }
+
+                    iterator<Cs...>& operator++() 
+                    {
+                        ++current;
+                        return *this;            
+                    }
+
+                    iterator<Cs...>& begin() 
+                    {
+                        current = 0;
+                        return *this;            
+                    }
+
+                    iterator<Cs...>& end() 
+                    {
+                        current = chunk.end;
+                        return *this;            
+                    }
             };
-
-            (pool<Cs>().swap(index, end - 1),...);
-            end--;
-
-            return pool<First>().data[index];
-        }
-   
-        void create(Data<Cs...> entity)
-        {
-            if (end == total)
-            {
-                (pool<Cs>().push(std::get<Cs>(entity)),...);
-                total++;
-            }
-            else 
-            {
-                (pool<Cs>().insert(std::get<Cs>(entity), end),...);
-            }
-
-            end++;
-        }
-
-        void trim()
-        {
-            if (end < total)
-            {
-                (pool<Cs>().erase(end),...);
-                total -= total - end;
-            }
-        }
-
-        void clear()
-        {
-            (pool<Cs>().clear(),...);
-            end = 0;
-            total = 0;
-        }
-    }; 
+    };
 
     template <typename... As>
     using Storages = Data<Storage<As>...>;
@@ -489,154 +525,202 @@ namespace necs
     // ----------------------------------------------------------------------------
     // Query
     // ----------------------------------------------------------------------------
+
     template <typename... Cs>
     using QueryData = Vec<Chunk<Cs...>>;
 
     template <typename... Cs>
-    class QueryIterator
-    {
-        size_t m_current_storage = 0;
-        size_t m_current_entity = 0;
+    class QueryResult
+    {        
         QueryData<Cs...> m_data;
 
-        void advance()
+        template <typename... As, typename... Ws, typename... Wos>
+        auto init(Storages<As...>& storages, With<Ws...>, Without<Wos...>) -> QueryData<Cs...>
         {
-            m_current_storage++;
+            static_assert(std::tuple_size_v<Data<As...>> > 0, "@InitQueryData - storages cannot be empty.");
+            static_assert(std::tuple_size_v<Data<Cs...>> > 0, "@InitQueryData - components cannot be empty.");
+            static_assert(filter::has_any_type<Data<Cs...>, Ws...>::value == false, "@InitQueryData - For & With component filters cannot repeat.");
+            static_assert(filter::has_any_type<Data<Cs...>, Wos...>::value == false, "@InitQueryData - For & Without component filters cannot repeat.");
+            static_assert(filter::has_any_type<Data<Ws...>, Wos...>::value == false, "@InitQueryData - With & Without component filters cannot repeat.");
+            using Match = filter::Match<Data<As...>, Data<Cs..., Ws...>, Data<Wos...>>;
+            static_assert(sizeof(Match{}) > 0, "@InitQueryData - reduntant query, no archetypes match the filter.");
 
-            while (m_current_storage < m_data.size())
-            {                
-                if (m_data[m_current_storage].end == 0)
+            QueryData<Cs...> data; 
+
+            [&storages, &data]<size_t... Is>(std::index_sequence<Is...>)
+            {
+                auto push = [&data]<typename A>(Storage<A>& storage)
                 {
-                    m_current_storage++;
-                }
-                else 
-                {
-                    return;
-                }
+                    data.push_back(storage.template get_chunk<Cs...>());
+                };
+
+                ((push(std::get<Is>(storages))),...);
             }
+            (Match{});
+
+            if (data.size() == 0)
+            {
+                throw Error("@InitQueryData - unexpected empty data.");
+            }
+
+            return data;
         }
 
-        public:
-            QueryIterator(QueryData<Cs...> _data)
-            : m_data(_data) 
+        public: 
+            template <typename... As, typename... Ws, typename... Wos>
+            QueryResult(Storages<As...>& storages, With<Ws...> ws, Without<Wos...> wos)
+            : m_data(init(storages, ws, wos)) 
             {
-                if (_data.size() == 0)
+                if (m_data.size() == 0)
                 {
-                    throw Error("@Iterator::Iterator - number of storages / data cannot be 0.");
+                    throw Error("@Query::Queery - number of storages / data cannot be 0.");
                 }
             }
 
-            bool operator!=(const QueryIterator<Cs...>& other) const 
+            auto iter()
             {
-                return m_current_storage != other.m_current_storage;
+                return iterator(m_data);
             }
 
-            auto operator*() -> Data<Cs&...>
+            template <typename Callback>
+            auto forEach(Callback&& callback)
             {
-                return m_data[m_current_storage].get(m_current_entity);
-            }
+                static_assert(
+                    std::is_invocable_v<Callback, Data<Cs&...>>, 
+                    "@QueryResult::forEach - Callback must be invocable."
+                );
 
-            QueryIterator<Cs...>& operator++() 
-            {   
-                m_current_entity++;
+                for (Chunk<Cs...>& chunk : m_data)
+                {
+                    for (size_t i = 0; i < chunk.end; i++)
+                    {
+                        callback(chunk.get(i));
+                    }
+                }
+            }   
 
-                if (m_current_entity >= m_data[m_current_storage].end) advance();
-
-                return *this;
-            }
-
-            QueryIterator<Cs...>& begin()
+            class iterator
             {
-                m_current_storage = 0;
-                m_current_entity = 0;
+                size_t m_current_chunk = 0;
+                size_t m_current_entity = 0;
+                QueryData<Cs...>& m_data;
 
-                if (m_data[0].end == 0) advance();
+                void advance()
+                {
+                    m_current_chunk++;
 
-                return *this;
-            }
+                    while (m_current_chunk < m_data.size())
+                    {                
+                        if (m_data[m_current_chunk].end == 0)
+                        {
+                            m_current_chunk++;
+                        }
+                        else 
+                        {
+                            return;
+                        }
+                    }
+                }
 
-            QueryIterator<Cs...>& end()
-            {
-                m_current_storage = m_data.size();
-                m_current_entity = m_data[m_current_storage].end;
+                public: 
+                    iterator(QueryData<Cs...>& _data)
+                    : m_data(_data) {}
 
-                return *this;
-            }
-    };
+                    bool operator!=(const iterator& other) const 
+                    {
+                        return m_current_chunk != other.m_current_chunk;
+                    }
 
-    template <typename... As,typename... Cs, typename... Ws, typename... Wos>
-    auto InitQueryData(Storages<As...>& storages, For<Cs...>, With<Ws...>, Without<Wos...>) -> QueryData<Cs...>
-    {
-        static_assert(std::tuple_size_v<Data<As...>> > 0, "@InitQueryData - storages cannot be empty.");
-        static_assert(std::tuple_size_v<Data<Cs...>> > 0, "@InitQueryData - components cannot be empty.");
-        static_assert(filter::has_any_type<Data<Cs...>, Ws...>::value == false, "@InitQueryData - For & With component filters cannot repeat.");
-        static_assert(filter::has_any_type<Data<Cs...>, Wos...>::value == false, "@InitQueryData - For & Without component filters cannot repeat.");
-        static_assert(filter::has_any_type<Data<Ws...>, Wos...>::value == false, "@InitQueryData - With & Without component filters cannot repeat.");
-        using Match = filter::Match<Data<As...>, Data<Cs..., Ws...>, Data<Wos...>>;
-        static_assert(sizeof(Match{}) > 0, "@InitQueryData - reduntant query, no archetypes match the filter.");
+                    auto operator*() -> Item<Cs...>
+                    {
+                        return m_data[m_current_chunk].get(m_current_entity);
+                    }
 
-        QueryData<Cs...> data; 
+                    auto operator++() -> iterator&
+                    {   
+                        m_current_entity++;
 
-        [&storages, &data]<size_t... Is>(std::index_sequence<Is...>)
-        {
-            auto push = [&data]<typename A>(Storage<A>& storage)
-            {
-                data.push_back(storage.template item<Cs...>());
+                        if (m_current_entity >= m_data[m_current_chunk].end) advance();
+
+                        return *this;
+                    }
+
+                    iterator& begin()
+                    {
+                        m_current_chunk = 0;
+                        m_current_entity = 0;
+
+                        if (m_data[0].end == 0) advance();
+
+                        return *this;
+                    }
+
+                    iterator& end()
+                    {
+                        m_current_chunk = m_data.size();
+                        m_current_entity = m_data[m_current_chunk].end;
+
+                        return *this;
+                    }
             };
-
-            ((push(std::get<Is>(storages))),...);
-        }
-        (Match{});
-
-        if (data.size() == 0)
-        {
-            throw Error("@InitQueryData - unexpected empty data.");
-        }
-
-        return data;
-    }
+    };
 
     template <typename... Ts>
     class Query;
 
     template <typename... Cs>
-    struct Query<For<Cs...>> : public QueryIterator<Cs...>
+    struct Query<For<Cs...>> : public QueryResult<Cs...>
     {
         template <typename... As>
         Query(Storages<As...>& storages) 
-        : QueryIterator<Cs...>(InitQueryData(storages, For<Cs...>{}, With<>{}, Without<>{})) {}
+        :  QueryResult<Cs...>(storages, With<>{}, Without<>{}) {}
     };
 
     template <typename... Cs, typename... Ws>
-    struct Query<For<Cs...>, With<Ws...>> : QueryIterator<Cs...>
+    struct Query<For<Cs...>, With<Ws...>> : QueryResult<Cs...>
     {
         template <typename... As>
-        Query(Data<Storage<As>&...> storages) 
-            : QueryIterator<Cs...>(InitQueryData(storages, For<Cs...>{}, With<Ws...>{}, Without<>{})) {}
+        Query(Storages<As...>& storages) 
+            : QueryResult<Cs...>(storages, With<Ws...>{}, Without<>{}) {}
     };
 
     template <typename... Cs, typename... Wos>
-    struct Query<For<Cs...>, Without<Wos...>> : QueryIterator<Cs...>
+    struct Query<For<Cs...>, Without<Wos...>> : QueryResult<Cs...>
     {
         template <typename... As>
-        Query(Data<Storage<As>&...> storages) 
-            : QueryIterator<Cs...>(InitQueryData(storages, For<Cs...>{}, With<>{}, Without<Wos...>{})) {}
+        Query(Storages<As...>& storages) 
+            : QueryResult<Cs...>(storages, For<Cs...>{}, With<>{}, Without<Wos...>{}) {}
     };
 
     template <typename... Cs, typename... Ws, typename... Wos>
-    struct Query<For<Cs...>, With<Ws...>, Without<Wos...>> : QueryIterator<Cs...>
+    struct Query<For<Cs...>, With<Ws...>, Without<Wos...>> : QueryResult<Cs...>
     {
         template <typename... As>
-        Query(Data<Storage<As>&...> storages) 
-            : QueryIterator<Cs...>(InitQueryData(storages, For<Cs...>{}, With<Ws...>{}, Without<Wos...>{})) {}
+        Query(Storages<As...>& storages) 
+            :  QueryResult<Cs...>(storages, For<Cs...>{}, With<Ws...>{}, Without<Wos...>{}) {}
     };
 
     template <typename... Qs>
-    using Queries = Data<Qs...>;
+    struct Queries : public Data<Qs...>
+    {
+        template <typename Q, typename... As>
+        auto init(Storages<As...>& storages) -> Q
+        {
+            return Q(storages);
+        }
+
+        template <typename... As>
+        Queries(Storages<As...>& storages)
+        : Data<Qs...>(std::make_tuple(init<Qs>(storages)...)) {};
+    };
 
     // ----------------------------------------------------------------------------
-    // Listener & Events
+    // Listener & built-in events
     // ----------------------------------------------------------------------------
+
+    struct EntityCreated { EntityId id; };
+    struct EntityRemoved { EntityId id; };
+    struct DataUpdated {Type type; };
 
     template <typename E>
     class Listener 
@@ -672,317 +756,327 @@ namespace necs
             }
     };
 
-    struct EntityCreated { Id id; };
-    struct EntityRemoved { Id id; };
-    template <typename T>
-    struct DataCreated {};
-    template <typename T>
-    struct DataRemoved {};
+    template <typename... Es>
+    using Listeners = Data
+    <
+        Listener<EntityCreated>, 
+        Listener<EntityRemoved>, 
+        Listener<DataUpdated>, 
+        Listener<Es>...
+    >;
 
-    template <typename... As, typename... Es>
-    auto InitListeners(Data<As...>, Data<Es...>)
+    // ----------------------------------------------------------------------------
+    // Control
+    // ----------------------------------------------------------------------------
+
+    class Control
     {
-        return []<typename... Cs>(Data<Cs...>)
+        Entities& m_entities;
+        Archetypes& m_archetypes;
+        Listener<EntityCreated>& m_on_created;
+        Listener<DataUpdated>& m_on_updated;
+
+        template <typename A>
+        auto get_storage() -> Storage<A>&
         {
-            return Data
-            <
-            Listener<EntityCreated>, 
-            Listener<EntityRemoved>, 
-            Listener<DataCreated<As>>..., 
-            Listener<DataRemoved<As>>..., 
-            Listener<DataCreated<Cs>>..., 
-            Listener<DataRemoved<Cs>>...,
-            Listener<Es>...
-            >{};
+            return std::any_cast<Storage<A>&>(m_archetypes.storage[GetType<A>()]);
         }
-        (filter::merge_types<As...>{});
+
+        template <typename C>
+        auto get_pool(EntityId id) -> Pool<C>&
+        {
+            return std::any_cast<Pool<C>&>(m_archetypes.pool[m_entities.type[id]][GetType<C>()]);
+        }
+
+        template <typename A, typename C>
+        auto get_pool() -> Pool<C>&
+        {
+            return std::any_cast<Pool<C>&>(m_archetypes.pool[GetType<A>()][GetType<C>()]);
+        }
+
+        public:
+            Control(Entities& _entities, Archetypes& _archetypes, Listener<EntityCreated>& _on_created, Listener<DataUpdated>& _on_updated)
+            : m_entities(_entities), m_archetypes(_archetypes), m_on_created(_on_created), m_on_updated(_on_updated) {}
+
+            bool exists(EntityId id) const
+            {
+                return id <= m_entities.total;
+            }
+
+            bool is_alive(EntityId id) const
+            {
+                return exists(id) && m_entities.alive[id];
+            }
+
+            bool is_locked(EntityId id) const
+            {
+                return exists(id) && m_entities.locked[id];
+            }
+
+            template <typename A>
+            bool is_archetype(EntityId id) const
+            {
+                return exists(id) && m_entities.type[id] == GetType<A>();
+            }
+            
+            bool is_archetype(EntityId id, Type archetype) const
+            {
+                return exists(id) && m_entities.type[id] == archetype;
+            }
+
+            template <typename A>
+            bool has_archetype() const
+            {
+                return m_archetypes.storage.find(GetType<A>()) != m_archetypes.storage.end();
+            }
+
+            bool has_archetype(Type archetype) const
+            {
+                return m_archetypes.storage.find(archetype) != m_archetypes.storage.end();
+            }
+
+            template <typename C>
+            bool has_component(EntityId id) const 
+            {
+                return exists(id) && m_archetypes.has[m_entities.type[id]][GetType<C>()];
+            }
+
+            bool has_component(EntityId id, Type t) const 
+            {
+                return exists(id) && m_archetypes.has[m_entities.type[id]][t];
+            }
+
+            auto get_type(EntityId id) const -> const Type&
+            {
+                return m_entities.type[id];
+            }
+
+            auto get_index(EntityId id) const -> const size_t&
+            {
+                return m_entities.index[id];
+            }
+
+            auto get_to_remove() const -> const Vec<EntityId>&
+            {
+                return m_entities.to_remove;
+            }
+
+            auto get_to_reuse() const -> const Vec<EntityId>&
+            {
+                return m_entities.to_reuse;
+            }
+            
+            auto get_entity_total() const -> const size_t&
+            {
+                return m_entities.total;
+            }
+
+            template <typename A>
+            auto get_archetype_total() const -> const size_t&
+            {
+                return get_storage<A>().get_total();
+            }
+
+            template <typename A>
+            auto get_archetype_count() const -> const size_t&
+            {
+                return get_storage<A>().get_count();
+            }
+
+            template <typename C> 
+            auto get_component(EntityId id) -> Option<Data<C&>>
+            {
+                if (!has_component<C>(id))
+                {
+                    return std::nullopt;
+                }    
+                else 
+                {
+                    return { get_pool<C>(id).data[m_entities.index[id]] }; 
+                }        
+            }
+
+            template <typename A, typename C> 
+            auto get_component(EntityId id) -> Data<C&>
+            {
+                return get_storage<A>().template get_component<C>(get_index(id));     
+            }
+
+            template <typename A, typename... Cs> 
+            auto iter()
+            {
+                return get_storage<A>().template iter<Cs...>();
+            }
+
+            template <typename A>
+            auto create(A entity, bool run_callbacks = false) -> EntityId
+            {
+                Storage<A>& storage = get_storage<A>();
+                Type type = GetType<A>();
+                EntityId id = m_entities.create(type, storage.end);
+                std::get<EntityId>(entity) = id;
+                storage.create(entity);
+
+                if (run_callbacks)
+                {
+                    m_on_created.call({ id });
+                    m_on_updated.call({ type });
+                }
+            }
+
+            template <typename A>
+            void populate(A entity, int count, bool run_callback = false) 
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    create(entity);
+                }
+                    
+                if (run_callback) m_on_updated.call({ GetType<A>() });
+            }
+
+            void remove(EntityId id) 
+            {   
+                if (is_alive(id))
+                {
+                    m_entities.to_remove.push_back(id);
+                }
+            }
+
+            template <typename A>
+            void wipe(bool run_callback = false) 
+            {
+                for (const EntityId& id : get_pool<A, EntityId>().data)
+                {
+                    remove(id);
+                }
+            }
+
+            void lock(EntityId id) 
+            {
+                if (exists(id))
+                {
+                    m_entities.locked[id] = true;
+                }
+            }
+
+            template <typename A>
+            void trim(bool run_callback = false) 
+            {
+                Storage<A>& storage = get_storage<A>();
+                storage.trim();
+
+                if (run_callback) m_on_updated.call({ GetType<A>() });
+            }
+
+            void update(bool run_callbacks = false) 
+            {
+                for (const EntityId& id : m_entities.to_remove)
+                {
+                    m_archetypes.update[m_entities.type[id]](id, run_callbacks);
+                }
+
+                m_entities.to_remove.clear();
+            }
     };
 
-    template <typename As, typename Es>
-    using Listeners = std::invoke_result_t<decltype(InitListeners(As{}, Es{}))>;
+    // ----------------------------------------------------------------------------
+    // Registry
+    // ----------------------------------------------------------------------------
 
-//     // ----------------------------------------------------------------------------
-//     // Unique
-//     // ----------------------------------------------------------------------------
+    template <typename As, typename Qs, typename Es>
+    class Registry;
 
-//     /**
-//      * Type-erased system data. Unique resources can be stored here.
-//      * Provides O1 access to storage component data at the cost of cache misses.
-//      * It is still much faster than find functions that filter and iterate through archetypes.
-//      * TODO: store dynamic queries.
-//      */
-//     class Uniques
-//     {
-//         Map<Type, StorageRef&> m_storages;
+    template <typename... As, typename... Qs, typename... Es>
+    class Registry<Data<As...>, Data<Qs...>, Data<Es...>>
+    {
+        Storages<As...> m_storages;
+        Listeners<Es...> m_listeners;
+        Queries<Qs...> m_queries{ m_storages };
+        Archetypes m_archetypes;
+        Entities m_entities;
 
-//         template <typename A>
-//         void init(Storage<A>& storage)
-//         {
-//             m_storages[key<A>()] = storage.ref();
-//         }
+        template <typename A, typename C>
+        auto init_component(Storage<A>& s)
+        {
+            Type a_type = std::type_index(typeid(A));
+            Type c_type = std::type_index(typeid(C));
 
-//         public:
-//             template <typename... As>
-//             Uniques(Storages<As...>& storages)
-//             {
-//                 (init(std::get<Storage<As>>(storages)),...);
-//             }
+            m_archetypes.has[a_type][c_type] = true;
+            m_archetypes.pool[a_type][c_type] = s.template get_pool<C>();
+        }
 
-//             template <typename T>
-//             auto key() -> Type
-//             {
-//                 return std::type_index(typeid(T));
-//             }
+        template <typename... Cs>
+        auto init_archetype(Storage<Data<Cs...>>& storage)
+        {
+            using A = Data<Cs...>;
 
-//             auto ref(Type archetype_key) -> StorageRef&
-//             {
-//                 return m_storages[archetype_key];
-//             }
+            ((init_component<A, Cs>(storage)),...);
+        
+            Type a_type = std::type_index(typeid(A));
 
-//             template <typename C>
-//             auto has(Type archetype_key)
-//             {
-//                 Type component_key = key<C>();
-//                 auto& r = ref(archetype_key);
+            m_archetypes.storage[a_type] = storage;
+            m_archetypes.update[a_type] = [this, &storage](EntityId id, bool run_callbacks = false) 
+            {
+                if (id < m_entities.total && m_entities.alive[id])
+                {
+                    size_t index = m_entities.index[id];
 
-//                 return r.has_component[component_key];
-//             }
+                    if (index < storage.get_count())
+                    {
+                        EntityId swapped_id = storage.remove(index);
 
-//             template <typename C>
-//             auto vector(Type archetype_key) -> Option<VecRef<C>>
-//             {
-//                 Type component_key = key<C>();
-//                 auto& r = ref(archetype_key);
+                        m_entities.index[swapped_id] = index;
+                        m_entities.alive[id] = false;
 
-//                 if (r.has_component[component_key])
-//                 {
-//                     return std::any_cast<VecRef<C>>(r.get_components[component_key]);
-//                 }
-//                 else 
-//                 {
-//                     return std::nullopt;
-//                 }
-//             }
+                        if (!m_entities.locked[id])
+                        {
+                            m_entities.to_reuse.push_back(id);
+                        }
 
-//             template <typename C>
-//             auto component(Type archetype_key, size_t index) -> Option<Ref<C>>
-//             {
-//                 Option<VecRef<C>> o = vector<C>(archetype_key);
+                        if (run_callbacks)
+                        {
+                            get_listener<EntityRemoved>().call({id});
+                            get_listener<DataUpdated>().call({m_entities.type[id]});
+                        }
+                    }
+                }
+            };
+        }
 
-//                 if (o.has_value())
-//                 {
-//                     auto& [v] = o.value();
-                    
-//                     return Ref<C>(v[index]);
-//                 }
-//                 else 
-//                 {
-//                     std::nullopt;
-//                 }
-//             }
-//     };
+        public: 
+            Registry() 
+            {
+                ((init_archetype(std::get<Storage<As>>(m_storages))),...);
+            }
 
-//     // ----------------------------------------------------------------------------
-//     // Registry
-//     // ----------------------------------------------------------------------------
+            auto get_control() 
+            {
+                return Control
+                {   
+                    m_entities, 
+                    m_archetypes, 
+                    get_listener<EntityCreated>(), 
+                    get_listener<DataUpdated>()
+                };
+            }
 
-//     template <typename As, typename Qs>
-//     class Registry;
+            template <typename A>
+            auto get_storage() -> Storage<A>&
+            {
+                return std::get<Storage<A>>(m_storages);
+            }
 
-//     /**
-//      * Main API class for ECS functions. 
-//      * Supports the following operations:
-//      * 
-//      * - CREATE - creates a single entity.
-//      * 
-//      * - POPULATE - populates a storage with copies of an entity.
-//      * 
-//      * - QUEUE - queues entities for removal. 
-//      * 
-//      * - UPDATE - executes all queued removals. 
-//      * 
-//      * - REMOVE - removes an entity instantly, invalidates iterators.
-//      * 
-//      * Contains utility functions for reading entity metadata. Exposes system data.
-//      * 
-//      *  @tparam As... Archetypes.
-//      *  @tparam Qs... Queries.
-//      */
-//     template <typename... As, typename... Qs>
-//     class Registry<Data<As...>, Data<Qs...>>
-//     {
-//         Entities m_entities;
-//         Storages<As...> m_storages;
-//         Queries<Qs...> m_queries = init_queries();
-//         Uniques m_uniques = init_uniques();
-
-//         // ---- Update & Init ---- //
-
-//         template <typename A> // updates an entity instantly
-//         void apply_update(Id id)
-//         {
-//             if (id < m_entities.total && m_entities.alive[id])
-//             {
-//                 Storage<A>& storage = get_storage<A>();
-//                 size_t index = m_entities.index[id];
-//                 Id swapped_entity = storage.remove(index);
-//                 m_entities.index[swapped_entity] = index;
-//                 if (!m_entities.locked[id])
-//                 {
-//                     m_entities.to_reuse.push_back(id);
-//                 }
-
-//                 m_entities.alive[id] = false;
-
-//                 // TODO: fire callbacks
-//             }
-//         }
-
-//         template <typename A>
-//         void init_update()
-//         {
-//             StorageRef& ref = get_storage<A>().ref();
-
-//             ref.update = [this] (Id id) {
-//                 apply_update<A>(id);
-//             };
-//         }
-
-//         auto init_queries() -> Queries<Qs...>
-//         {
-//             return std::make_tuple<Qs...>((Qs(m_storages))...);
-//         };
-
-//         auto init_uniques() -> Uniques
-//         {
-//             return Uniques(m_storages);
-//         }
-
-//         // ---- Private access ---- //
-
-//         template <typename A>
-//         auto get_storage() -> Storage<A>&
-//         {
-//             std::get<Storage<A>>(m_storages);
-//         }
-
-//         template <typename A>
-//         auto get_ids() -> Vec<Id>&
-//         {
-//             return get_storage<A>().ids();
-//         }
-
-//         template <typename A, typename C>
-//         auto get_vector() -> Vec<C>&
-//         {
-//             return get_storage<A>().template vector<C>();
-//         }
-
-//         public:
-
-//             Registry()
-//             {
-//                 (init_update<As>(),...);            
-//             }
-
-//             // ---- Metadata ---- //
-
-//             template <typename A>
-//             bool has_entities() {}
-//             bool has_entities() {}
-//             bool has_components() {}
-
-//             bool is_alive(Id id) {
-//                 return m_entities.alive[id];
-//             }
-
-//             bool is_locked(Id id) {
-//                 return m_entities.locked[id];
-//             }
-
-//             // Checks that the id exists.
-//             bool is_valid(Id id)
-//             {
-//                 return id < m_entities.total;
-//             }
-
-//             template <typename A>
-//             bool is_type() {} 
-
-//             template <typename A>
-//             size_t count() 
-//             {
-//                 return get_storage<A>().count();
-//             }
-
-//             size_t count() 
-//             {
-//                 return m_entities.to
-//             }
-//             template <typename A>
-//             size_t capacity() {}
-//             size_t capacity() {}
-//             template <typename A>
-//             size_t dead_count() {}
-//             size_t dead_count() {}
-//             auto type() -> Type {}
-//             size_t index() {} 
-
-//             // ---- Public access ---- //
-
-//             // Safe getter, validates entity. Gets component from type-erased data, less performant.
-//             template <typename C>
-//             auto view(Id id) -> Option<Ref<C>>
-//             {
-//                 if (is_valid(id) && is_alive(id))
-//                 {
-//                     return m_uniques.component<C>(m_entities.type[id], m_entities.index[id]);
-//                 }
-//                 else 
-//                 {
-//                     return std::nullopt;
-//                 }
-//             }
+            template <typename Q>
+            auto get_query() -> Q&
+            {
+                return std::get<Q>(m_queries);
+            }
             
-//             // Validate entity manually beforehand. Unsafe, fast getter.
-//             template <typename A, typename C>
-//             auto get(Id id) -> C&
-//             {
-//                 return get_storage<A>().template component<C>(id)
-//             }
-
-//             template <typename A, typename... Cs>
-//             auto iter() -> StorageIterator<Cs...> {
-//                 return get_storage<A>().template iterator<Cs...>();
-//             } 
-
-//             template <typename Q>
-//             auto query() -> Q& {
-
-//                 if (filter::has_type<Q, Data<Qs...>>{})
-//                 {
-//                     // retrieve query from tuple
-//                 }
-//                 else 
-//                 {
-//                     // create or retrieve dynamic query
-//                 }
-
-//                 return std::get<Q>(m_queries);
-//             }
-
-//             // ---- Operations ---- //
-
-//             auto create() {}
-//             void populate() {}
-//             void queue() {}
-//             void update() {}
-//             void remove() {}
-//             void lock() {}
-
-//             // ---- Utility ---- //
-
-//             void trim() {}
-//     };  
-// };
+            template <typename E>
+            auto get_listener() -> Listener<E>&
+            {
+                return std::get<Listener<E>>(m_listeners);
+            }
+    };
 };

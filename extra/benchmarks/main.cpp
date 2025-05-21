@@ -40,15 +40,20 @@ void benchmark_create()
 
 void benchmark_new()
 {
-    using Monster = necs::Archetype<Position, Health, Detector>;
+    using Monster = necs::Archetype<Position, Health, Detector, int, float>;
     using Tree = necs::Archetype<Position, Health>;
 
-    using As = necs::Data<Monster, Tree>;
-    using Matched = necs::filter::match_index<As, std::make_index_sequence<std::tuple_size_v<As>>, Data<const Position, Detector>, Data<>>::type;
+    using SingleQuery = necs::Query<necs::For<Position>>;
+    using DoubleQuery = necs::Query<necs::For<Position, Health>>;
+    using TripleQuery = necs::Query<necs::For<necs::EntityId, Health, const Detector>>;
 
-    necs::Storages<Tree, Monster> storages;
+    using ArchetypeData = necs::Data<Monster, Tree>;
+    using QueryData = necs::Data<SingleQuery, DoubleQuery, TripleQuery>;
+    using EventData = necs::Data<>;
 
-    auto& monster_storage = std::get<1>(storages);
+    necs::Registry<ArchetypeData, QueryData, EventData> registry;
+
+    necs::Storage<Monster>& monster_storage = registry.get_storage<Monster>();
 
     benchmark("Create 3 components:", [&monster_storage](){
         for (int i = 0; i < entity_count; i++)
@@ -59,6 +64,8 @@ void benchmark_new()
 
     auto single_iter = monster_storage.iter<Health>();
     auto double_iter = monster_storage.iter<Health, Position>();
+    auto triple_iter = monster_storage.iter<Health, Position, Detector>();
+    auto quad_iter = monster_storage.iter<necs::EntityId, Health, Position, Detector>();
 
     benchmark("1-component iter: ", [&single_iter](){
         for (auto [h] : single_iter)
@@ -74,20 +81,38 @@ void benchmark_new()
             p.x++;
         }
     });
+
+    benchmark("3-component iter: ", [&triple_iter](){
+        for (auto [h, p, d] : triple_iter)
+        {
+            h.value++;
+            p.x++;
+            d.target++;
+        }
+    });
+
+    benchmark("4-component iter: ", [&quad_iter](){
+        for (auto [id, h, p, d] : quad_iter)
+        {
+            h.value++;
+            p.x++;
+            d.target++;
+        }
+    });
     
-   necs::Query<necs::For<Position>> single_query(storages);
-   necs::Query<necs::For<Position, Health>> double_query(storages);
-   necs::Query<necs::For<Position, Health, const Detector>> triple_query(storages);
+    auto& single_query = registry.get_query<SingleQuery>();
+    auto& double_query = registry.get_query<DoubleQuery>();
+    auto& triple_query = registry.get_query<TripleQuery>();
 
     benchmark("1-component query ", [&single_query](){
-        for (auto [pos] : single_query)
+        for (auto [pos] : single_query.iter())
         {
             pos.x++;
         }
     });
 
     benchmark("2-component query ", [&double_query](){
-        for (auto  [pos, health]  : double_query)
+        for (auto  [pos, health]  : double_query.iter())
         {
             pos.x++;
             health.value++;
@@ -95,9 +120,8 @@ void benchmark_new()
     });
 
     benchmark("3-component query ", [&triple_query](){
-        for (auto [pos, health, detector] : triple_query)
+        for (auto [id, health, detector] : triple_query.iter())
         {
-            pos.x++;
             health.value++;
         }
     });
