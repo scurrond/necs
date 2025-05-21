@@ -3,7 +3,7 @@
 
 #include "../model.hpp"
 
-Registry<Archetypes, Events, Singletons> reg;
+Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
 
 int entity_count = 0;
 
@@ -30,79 +30,21 @@ void benchmark(std::string msg, F func, int iterations = 1000)
 
 void benchmark_create()
 {
-    benchmark("Create 3 components: ", [](){
+    Control control = reg.get_control();
+
+    benchmark("Create 3 components:", [&control](){
         for (int i = 0; i < entity_count; i++)
         {
-            reg.create(A3());
+            control.create(Monster());
         }
     }, 1);
 }
 
-void benchmark_new()
-{
-    using Monster = necs::Archetype<Position, Health, Detector, int, float>;
-    using Tree = necs::Archetype<Position, Health>;
-
-    using SingleQuery = necs::Query<necs::For<Position>>;
-    using DoubleQuery = necs::Query<necs::For<Position, Health>>;
-    using TripleQuery = necs::Query<necs::For<necs::EntityId, Health, const Detector>>;
-
-    using ArchetypeData = necs::Data<Monster, Tree>;
-    using QueryData = necs::Data<SingleQuery, DoubleQuery, TripleQuery>;
-    using EventData = necs::Data<>;
-
-    necs::Registry<ArchetypeData, QueryData, EventData> registry;
-
-    necs::Storage<Monster>& monster_storage = registry.get_storage<Monster>();
-
-    benchmark("Create 3 components:", [&monster_storage](){
-        for (int i = 0; i < entity_count; i++)
-        {
-            monster_storage.create(Monster());
-        }
-    }, 1);
-
-    auto single_iter = monster_storage.iter<Health>();
-    auto double_iter = monster_storage.iter<Health, Position>();
-    auto triple_iter = monster_storage.iter<Health, Position, Detector>();
-    auto quad_iter = monster_storage.iter<necs::EntityId, Health, Position, Detector>();
-
-    benchmark("1-component iter: ", [&single_iter](){
-        for (auto [h] : single_iter)
-        {
-            h.value++;
-        }
-    });
-
-    benchmark("2-component iter: ", [&double_iter](){
-        for (auto [h, p] : double_iter)
-        {
-            h.value++;
-            p.x++;
-        }
-    });
-
-    benchmark("3-component iter: ", [&triple_iter](){
-        for (auto [h, p, d] : triple_iter)
-        {
-            h.value++;
-            p.x++;
-            d.target++;
-        }
-    });
-
-    benchmark("4-component iter: ", [&quad_iter](){
-        for (auto [id, h, p, d] : quad_iter)
-        {
-            h.value++;
-            p.x++;
-            d.target++;
-        }
-    });
-    
-    auto& single_query = registry.get_query<SingleQuery>();
-    auto& double_query = registry.get_query<DoubleQuery>();
-    auto& triple_query = registry.get_query<TripleQuery>();
+void benchmark_query()
+{    
+    auto& single_query = reg.get_query<SingleQuery>();
+    auto& double_query = reg.get_query<DoubleQuery>();
+    auto& triple_query = reg.get_query<TripleQuery>();
 
     benchmark("1-component query ", [&single_query](){
         for (auto [pos] : single_query.iter())
@@ -127,169 +69,77 @@ void benchmark_new()
     });
 }
 
-void benchmark_query()
-{    
-    benchmark("1-component query ", [](){
-        for (auto [id, data] : reg.query<Health>())
-        {
-            auto& [health] = data;
-            health.value++;
-        }
-    });
-
-    benchmark("2-component query: ", [](){
-        for (auto [id, data] : reg.query<Health, Position>())
-        {
-            auto& [health, pos] = data;
-            health.value++;
-            pos.x++;
-        }
-    });
-
-    benchmark("3-component query: ", [](){
-        for (auto [id, data] : reg.query<Health, Position, Name>())
-        {
-            auto& [health, pos, name] = data;
-            health.value++;
-            pos.x++;
-        }
-    });
-}
-
 void benchmark_iter()
 {
-    benchmark("1-component iter: ", [](){
-        for (auto [id, data] : reg.query_in<A3, Health>())
+    Control control = reg.get_control();
+
+    benchmark("1-component iter: ", [&control](){
+        for (auto [h] : control.iter<Monster, Health>())
         {
-            auto& [health] = data;
-            health.value++;
+            h.value++;
         }
     });
 
-    benchmark("2-component iter: ", [](){
-        for (auto [id, data] : reg.query_in<A3, Health, Position>())
+    benchmark("2-component iter: ", [&control](){
+        for (auto [h, p] : control.iter<Monster, Health, Position>())
         {
-            auto& [health, pos] = data;
-            health.value++;
-            pos.x++;
+            h.value++;
+            p.x++;
         }
     });
 
-    benchmark("3-component iter: ", [](){
-        for (auto [id, data] : reg.query_in<A3, Health, Position, Name>())
+    benchmark("3-component iter: ", [&control](){
+        for (auto [h, p, d] : control.iter<Monster, Health, Position, Detector>())
         {
-            auto& [health, pos, name] = data;
-            health.value++;
-            pos.x++;
-            name.value = "F";
+            h.value++;
+            p.x++;
+            d.target++;
+        }
+    });
+
+    benchmark("4-component iter: ", [&control](){
+        for (auto [id, h, p, d] : control.iter<Monster, EntityId, Health, Position, Detector>())
+        {
+            h.value++;
+            p.x++;
+            d.target++;
         }
     });
 }
 
 void benchmark_get()
 {
-    auto& ids = reg.ids<A3>();
+    Control control = reg.get_control();
 
-    benchmark("1-component get: ", [&ids](){
-        for (auto& id : ids)
+    benchmark("1-component get: ", [&control](){
+        for (auto [id] : control.iter<Monster, EntityId>())
         {
-            auto [health] = reg.get<A3, Health>(id);
+            auto [health] = control.get_component<Health>(id).value();
             health.value++;
         }
     });
 
-    benchmark("2-component get: ", [&ids](){
-        for (auto& id : ids)
+    benchmark("2-component get: ", [&control](){
+        for (auto [id] : control.iter<Monster, EntityId>())
         {
-            auto [health, pos] = reg.get<A3, Health, Position>(id);
+            auto [health] = control.get_component<Health>(id).value();
+            auto [pos] = control.get_component<Position>(id).value();
+
             health.value++;
-            pos.x++; 
+            pos.x++;         
         }
     });
 
-    benchmark("3-component get: ", [&ids](){
-        for (auto& id : ids)
+    benchmark("3-component get: ", [&control](){
+        for (auto [id] : control.iter<Monster, EntityId>())
         {
-            auto [health, pos, name] = reg.get<A3, Health, Position, Name>(id);
+            auto [health] = control.get_component<Health>(id).value();
+            auto [pos] = control.get_component<Position>(id).value();
+            auto [det] = control.get_component<Detector>(id).value();
+
             health.value++;
-            pos.x++; 
-            name.value = "F";
-        }
-    });
-}
-
-void benchmark_view()
-{
-    auto& ids = reg.ids<A3>();
-
-    benchmark("1-component view: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.view<A3, Health>(id);
-
-            auto& [health] = view.value();
-            health.value++;
-        }
-    });
-
-    benchmark("2-component view: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.view<A3, Health, Position>(id);
-
-            auto& [health, pos] = view.value();
-            health.value++;
-            pos.x++; 
-        }
-    });
-
-    benchmark("3-component view: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.view<A3, Health, Position, Name>(id);
-
-            auto& [health, pos, name] = view.value();
-            health.value++;
-            pos.x++; 
-            name.value = "F";
-        }
-    });
-}
-
-void benchmark_find()
-{
-    auto& ids = reg.ids<A3>();
-
-    benchmark("1-component find: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.find<Health>(id);
-
-            auto& [health] = view.value();
-            health.value++;
-        }
-    });
-
-    benchmark("2-component find: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.find<Health, Position>(id);
-
-            auto& [health, pos] = view.value();
-            health.value++;
-            pos.x++; 
-        }
-    });
-
-    benchmark("3-component find: ", [&ids](){
-        for (auto& id : ids)
-        {
-            auto view = reg.find<Health, Position, Name>(id);
-
-            auto& [health, pos, name] = view.value();
-            health.value++;
-            pos.x++; 
-            name.value = "F";
+            pos.x++;   
+            det.target++;      
         }
     });
 }
@@ -308,13 +158,7 @@ int main(int argc, char* argv[])
     benchmark_create();
     benchmark_iter();
     benchmark_query();
-    // benchmark_get();
-    // benchmark_view();
-    // benchmark_find();
- 
-    benchmark_new();
-
-
+    benchmark_get();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

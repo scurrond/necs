@@ -1,9 +1,8 @@
 #pragma once 
 
 #include "../necs.hpp"
-#include "../ecs.hpp"
 
-using namespace NECS;
+using namespace necs;
 
 // COMPONENTS
 
@@ -14,23 +13,23 @@ struct Name { std::string value; };
 
 // ARCHETYPES
 
-using A1 = Data<Health>;
-using A2 = Data<Health, Position>;
-using A3 = Data<Health, Position, Name>;
+using Monster = Archetype<Position, Health, Detector>;
+using Tree = Archetype<Position, Health>;
 
-using Archetypes = Data<A1, A2, A3>;
+using ArchetypeTypes = Data<Monster, Tree>;
+
+// QUERIES
+
+using SingleQuery = Query<For<Position>>;
+using DoubleQuery = Query<For<Position, Health>>;
+using TripleQuery = Query<For<EntityId, Health, const Detector>>;
+using QuadQuery = Query<For<EntityId, Health, Position, const Detector>>;
+
+using QueryTypes = Data<SingleQuery, DoubleQuery, TripleQuery, QuadQuery>;
 
 // EVENTS
 
-struct AEvent { int value; };
-struct BEvent { int value; };
+struct StartGame { int value; };
+struct QuitGame { int value; };
 
-using Events = Data<AEvent, BEvent>;
-
-// SINGLETONS
-
-struct S1 {};
-struct S2 {};
-struct S3 {};
-
-using Singletons = Data<S1, S2, S3>;
+using EventTypes = Data<StartGame, QuitGame>;

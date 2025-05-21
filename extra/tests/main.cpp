@@ -1,21 +1,24 @@
 #include "../model.hpp"
 
-Registry<Archetypes, Events, Singletons> reg;
+Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
 
 void test_subscribe()
 {
-    reg.subscribe<EntityCreated>
+    auto& listener = reg.get_listener<EntityCreated>();
+
+    listener.subscribe
     ([](EntityCreated event){
-        auto& info = reg.info(event.id);
+
+        Control<Monster> control = reg.get_control<Monster>();
 
         std::cout << "\n------------------------------------------------\n";
         std::cout << "Created entity:" 
         << "\n Id: " << event.id 
-        << "\n Type: " << info.type.name()
-        << "\n Index: " << info.index
-        << "\n State: " << info.state;
+        << "\n Type: " << control.get_type(event.id).name()
+        << "\n Index: " << control.get_index(event.id)
+        << "\n Alive: " << control.is_alive(event.id);
 
-        if (info.state != LIVE)
+        if (!control.is_alive(event.id))
         {
             throw std::runtime_error("Incorrect entity state in entity metadata.");
         }
@@ -24,43 +27,38 @@ void test_subscribe()
     });
 }
 
-template <typename A, typename... Cs>
-auto test_view(EntityId id) -> Data<Cs&...>
+template <typename C>
+auto test_get(EntityId id) -> Item<C>
 {
-    View<Cs...> view = reg.view<A, Cs...>(id);
+    Control<Monster> control = reg.get_control<Monster>();
 
-    if (!view.has_value())
+    Option<Item<C>> result = control.get<Monster, C>(id);
+
+    if (!result.has_value())
     {
-        throw std::runtime_error("View failed.");
+        throw std::runtime_error("Get failed.");
     }
 
-    return view.value();
-}
-
-template <typename A, typename... Cs>
-auto test_find(EntityId id) -> Data<Cs&...>
-{
-    View<Cs...> find = reg.find<Cs...>(id);
-
-    if (!find.has_value())
-    {
-        throw std::runtime_error("Find failed.");
-    }
-
-    return find.value();
+    return result.value();
 }
 
 void test_create()
 {
-    EntityId id = reg.create(A3(Health{10}, Position{1, 4}, Name{"First"}));
+    Control<Monster> control = reg.get_control<Monster>();
 
-    auto& info = reg.info(id);
+    EntityId id = control.create(Monster(0, Position{1, 4}, Health{10}, Detector{5}), true);
 
-    if (info.index != 0)
+    if (control.get_index(id) != 0)
     {
         throw std::runtime_error("Incorrect entity index in entity metadata.");
     }
-    if (!reg.is_type<A3>(id))
+
+    if (!control.is_archetype<Monster>(id))
+    {
+        throw std::runtime_error("Incorrect entity type in entity metadata.");
+    }
+
+    if (!control.has_component<Position>(id))
     {
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
@@ -69,13 +67,13 @@ void test_create()
 
     std::cout << "Components:";
 
-    auto [name] = test_view<A3, Name>(id);
-    std::cout << "\n - Name: " << name.value;
+    auto [det] = test_get<Detector>(id);
+    std::cout << "\n - Detector: target: " << det.target;
 
-    auto [pos] = test_find<A3, Position>(id);
+    auto [pos] = test_get<Position>(id);
     std::cout << "\n - Pos: x: " << pos.x << " y: " << pos.y;
 
-    auto [health] = reg.get<A3, Health>(id);
+    auto [health] = test_get<Health>(id);
     std::cout << "\n - Health: " << health.value;
 
     std::cout << "\n------------------------------------------------\n";
@@ -83,71 +81,41 @@ void test_create()
 
 void test_query()
 {
-    for (auto [id, data] : reg.query<Health, Position, Name>())
-    {
-        auto& [health, pos, name] = data;
+    auto& query = reg.get_query<QuadQuery>();
 
+    for (auto [id, health, pos, det] : query.iter())
+    {
         std::cout << "------------------------------------------------\n";
         std::cout << "Components from query: ";
         std::cout << "\n - Health: " << health.value;
         std::cout << "\n - Position: x: " << pos.x << " y: " << pos.y;
-        std::cout << "\n - Name: " << name.value;
+        std::cout << "\n - Detector: target: " << det.target;
         std::cout << "\n------------------------------------------------\n";
 
         health.value++;
         pos.x++;
-        name.value = "F";
     };
-}
-
-void test_id_locking()
-{
-
 }
 
 void test_populate()
 {
-    reg.populate(A3(), 3);
+    Control<Monster> control = reg.get_control<Monster>();
+
+    control.populate(Monster(), 3);
 }
 
-void test_has_component()
+void test_remove()
 {
-    bool v = reg.has_component<Name>(0);
+    Control<Monster> control = reg.get_control<Monster>();
 
-    std::cout << "\nEntity 0 has Name: " << v << "\n";
-}
+    control.remove(0);
 
-void test_pool()
-{
-    necs::Pool<Position> pool;
-}
+    control.update();
 
-void test_storage()
-{
-    
-    using Snake = necs::Archetype<Position, Health>;
-    necs::Storage<Snake> storage;
-}
-
-void test_iterator()
-{
-    necs::Pool<Position> pool;
-
-    Position pos1;
-    Position pos2;
-    Position pos3;
-    size_t end = 3;
-
-    pool.push(pos1);
-    pool.push(pos2);
-    pool.push(pos3);
-
-    necs::QueryIterator<Position> iter(end, pool.data);
-
-    size_t counter = 0; 
-
-
-    std::cout << "Counter: " << counter << "\n";
+    if(control.is_alive(0))
+    {
+        throw std::runtime_error("The entity was not removed properly.");
+    }
 }
 
 int main()
@@ -158,10 +126,7 @@ int main()
     test_query();
     test_populate();
     test_query();
-
-    test_pool();
-    test_storage();
-    test_iterator();
+    test_remove();
     std::cout << "=== Run succeeded ===\n";
 
     return 0;
