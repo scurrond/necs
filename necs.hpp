@@ -196,6 +196,8 @@ namespace necs
     using Error = std::runtime_error; // std::runtime_error alias.
     template <typename... Ts> // Tuple alias for convenience.
     using Data = std::tuple<Ts...>; 
+    template <typename T>
+    using Ref = std::reference_wrapper<T>;
     template <typename T> // Vec alias.
     using Vec = std::vector<T>;
     template <typename T> // Reference vec alias.
@@ -228,8 +230,7 @@ namespace necs
     struct Entities 
     {
         size_t total;
-        size_t living_count;
-        size_t dead_count;
+        size_t count;
 
         Vec<EntityId> to_reuse; // Ids to reuse.
         Vec<EntityId> to_remove; // Entities to remove on next update.
@@ -264,11 +265,23 @@ namespace necs
                 index[id] = i;
 
                 to_reuse.pop_back();
-                dead_count--;
             }
 
-            living_count++;
+            count++;
             return id;
+        }
+    
+        auto remove(EntityId swapped_id, EntityId removed_id)
+        {
+            index[swapped_id] = index[removed_id];
+            alive[removed_id] = false;
+
+            if (!locked[removed_id])
+            {
+                to_reuse.push_back(removed_id);
+            }
+
+            count--;
         }
     };  
 
@@ -282,6 +295,8 @@ namespace necs
     struct Archetypes
     {
         Map<Type, Map<Type, bool>> has; 
+        Map<Type, size_t*> total;
+        Map<Type, size_t*> count;
         Map<Type, Func<void, EntityId, bool>> update; 
     };
 
@@ -350,7 +365,7 @@ namespace necs
             return std::get<VecRef<C>>(components);
         }
 
-        auto get(size_t index) -> Data<Cs&...>
+        auto get(size_t index) -> Item<Cs...>
         {
             return std::tie<Cs...>((vec<Cs>()[index])...);
         }
@@ -570,11 +585,11 @@ namespace necs
             }
 
             template <typename Callback>
-            auto forEach(Callback&& callback)
+            auto for_each(Callback&& callback)
             {
                 static_assert(
                     std::is_invocable_v<Callback, Data<Cs&...>>, 
-                    "@QueryResult::forEach - Callback must be invocable."
+                    "@QueryResult::for_each - Callback must be invocable."
                 );
 
                 for (Chunk<Cs...>& chunk : m_data)
@@ -753,17 +768,17 @@ namespace necs
     >;
 
     // ----------------------------------------------------------------------------
-    // Info
+    // Reader
     // ----------------------------------------------------------------------------
 
-    class Info
+    class Reader
     {
         protected: 
             Entities& m_entities;
             Archetypes& m_archetypes;
 
         public:
-            Info(Entities& _entities, Archetypes& _archetypes)
+            Reader(Entities& _entities, Archetypes& _archetypes)
             : m_entities(_entities), m_archetypes(_archetypes) {}
 
             bool exists(EntityId id) const
@@ -782,14 +797,30 @@ namespace necs
             }
 
             template <typename A>
-            bool is_archetype(EntityId id) const
+            bool is_type(EntityId id) const
             {
                 return is_alive(id) && m_entities.type[id] == GetType<A>();
             }
             
-            bool is_archetype(EntityId id, Type archetype) const
+            bool is_type(EntityId id, Type archetype) const
             {
                 return is_alive(id) && m_entities.type[id] == archetype;
+            }
+
+            template <typename A>
+            bool is_empty()
+            {
+                return get_count<A>() == 0;
+            }
+
+            bool is_empty(Type t)
+            {
+                return get_count(t) == 0;
+            }
+
+            bool is_empty()
+            {
+                return get_count() == 0;
             }
 
             template <typename A>
@@ -814,6 +845,11 @@ namespace necs
                 return is_alive(id) && m_archetypes.has[m_entities.type[id]][t];
             }
 
+            bool has_component(Type a_type, Type c_type) const 
+            {
+                return m_archetypes.has[a_type][c_type];
+            }
+
             auto get_type(EntityId id) const -> const Type&
             {
                 return m_entities.type[id];
@@ -833,23 +869,50 @@ namespace necs
             {
                 return m_entities.to_reuse;
             }
-            
+        
+            template <typename A>
+            auto get_total() const -> const size_t&
+            {
+                return m_archetypes.total[GetType<A>()];
+            }
+
+            auto get_total(Type t) const -> const size_t&
+            {
+                return *m_archetypes.total[t];            
+            }
+
             auto get_total() const -> const size_t&
             {
                 return m_entities.total;
             }
+
+            template <typename A>
+            auto get_count() const -> const size_t&
+            {
+                return *m_archetypes.count[GetType<A>()];
+            }
+
+            auto get_count(Type t) const -> const size_t&
+            {
+                return *m_archetypes.count[t];        
+            }
+
+            auto get_count() const -> const size_t&
+            {
+                return m_entities.count;
+            }
     };
 
     // ----------------------------------------------------------------------------
-    // Control
+    // Writer
     // ----------------------------------------------------------------------------
 
     template <typename... As>
-    class Control : public Info
+    class Writer : public Reader
     {
-        using ControlData = Data<Storage<As>&...>;
+        using WriterData = Data<Storage<As>&...>;
 
-        ControlData m_data;
+        WriterData m_data;
         Listener<EntityCreated>& m_on_created;
         Listener<DataUpdated>& m_on_updated;
 
@@ -859,26 +922,15 @@ namespace necs
             return std::get<Storage<A>&>(m_data);
         }
 
-        template <typename... Cs>
-        auto get_matching()
-        {
-            return [this] <size_t... Is>(std::index_sequence<Is...>)
-            {
-                return std::tie(std::get<Is>(m_data)...);
-            }
-            (filter::Match<Data<As...>, Data<Cs...>>{});
-        }
-
         public:
-
-            Control
+            Writer
             (
                 Entities& _entities, 
                 Archetypes& _archetypes, 
-                ControlData _data,
+                WriterData _data,
                 Listener<EntityCreated>& _on_created, 
                 Listener<DataUpdated>& _on_updated
-            ) : Info(_entities, _archetypes),
+            ) : Reader(_entities, _archetypes),
             m_data(_data),
             m_on_created(_on_created), 
             m_on_updated(_on_updated)
@@ -887,7 +939,7 @@ namespace necs
             template <typename A, typename... Cs> 
             auto get(EntityId id) -> Option<Item<Cs...>>
             {
-                if (!is_archetype<A>(id) || !is_alive(id))
+                if (!is_type<A>(id) || !is_alive(id))
                 {
                     return std::nullopt;
                 }
@@ -902,15 +954,19 @@ namespace necs
             {
                 Option<Item<Cs...>> item;
 
-                [this, &item, &id]<typename... Ms>(Data<Storage<Ms>&...> storages)
+                [this, &item, &id] <size_t... Is>(std::index_sequence<Is...>)
                 {
                     bool found = false;
 
-                    auto f = [this, &item, &id, &found]<typename A>(Storage<A>& storage)
+                    int count = 0;
+
+                    auto f = [this, &item, &id, &found, &count]<typename A>(Storage<A>& storage)
                     {
+                        count++;
+
                         if (found) return;
 
-                        if (is_archetype<A>(id))
+                        if (is_type<A>(id))
                         {
                             found = true;
 
@@ -918,9 +974,9 @@ namespace necs
                         }
                     };  
 
-                    ((f(std::get<Storage<Ms>&>(storages))),...);
+                    ((f(std::get<Is>(m_data))),...);
                 }
-                (get_matching<Data<Cs...>>());
+                (filter::Match<Data<As...>, Data<Cs...>>{});
 
                 return item;
             }
@@ -1039,29 +1095,20 @@ namespace necs
         
             Type a_type = std::type_index(typeid(A));
 
+            m_archetypes.total[a_type] = &storage.get_total();
+            m_archetypes.count[a_type] = &storage.get_count();
             m_archetypes.update[a_type] = [this, &storage](EntityId id, bool run_callbacks = false) 
             {
                 if (id < m_entities.total && m_entities.alive[id])
                 {
                     size_t index = m_entities.index[id];
 
-                    if (index < storage.get_count())
+                    m_entities.remove(storage.remove(index), id);
+
+                    if (run_callbacks)
                     {
-                        EntityId swapped_id = storage.remove(index);
-
-                        m_entities.index[swapped_id] = index;
-                        m_entities.alive[id] = false;
-
-                        if (!m_entities.locked[id])
-                        {
-                            m_entities.to_reuse.push_back(id);
-                        }
-
-                        if (run_callbacks)
-                        {
-                            get_listener<EntityRemoved>().call({id});
-                            get_listener<DataUpdated>().call({m_entities.type[id]});
-                        }
+                        get_listener<EntityRemoved>().call({id});
+                        get_listener<DataUpdated>().call({m_entities.type[id]});
                     }
                 }
             };
@@ -1074,15 +1121,27 @@ namespace necs
                 ((init_archetype(std::get<Storage<As>>(m_storages))),...);
             }
 
-            auto get_info() 
+            auto get_reader() -> Reader
             {
-                return Info{m_entities, m_archetypes};
+                return Reader{m_entities, m_archetypes};
+            }
+
+            auto get_writer() -> Writer<As...>
+            {
+                return Writer
+                {   
+                    m_entities, 
+                    m_archetypes, 
+                    std::tie(get_storage<As>()...),
+                    get_listener<EntityCreated>(), 
+                    get_listener<DataUpdated>()
+                };
             }
 
             template <typename... Ts>
-            auto get_control() 
+            auto get_writer() -> Writer<Ts...>
             {
-                return Control
+                return Writer
                 {   
                     m_entities, 
                     m_archetypes, 

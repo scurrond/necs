@@ -9,16 +9,16 @@ void test_subscribe()
     listener.subscribe
     ([](EntityCreated event){
 
-        Control<Monster> control = reg.get_control<Monster>();
+        Writer<Monster> writer = reg.get_writer<Monster>();
 
         std::cout << "\n------------------------------------------------\n";
         std::cout << "Created entity:" 
         << "\n Id: " << event.id 
-        << "\n Type: " << control.get_type(event.id).name()
-        << "\n Index: " << control.get_index(event.id)
-        << "\n Alive: " << control.is_alive(event.id);
+        << "\n Type: " << writer.get_type(event.id).name()
+        << "\n Index: " << writer.get_index(event.id)
+        << "\n Alive: " << writer.is_alive(event.id);
 
-        if (!control.is_alive(event.id))
+        if (!writer.is_alive(event.id))
         {
             throw std::runtime_error("Incorrect entity state in entity metadata.");
         }
@@ -30,9 +30,9 @@ void test_subscribe()
 template <typename C>
 auto test_get(EntityId id) -> Item<C>
 {
-    Control<Monster> control = reg.get_control<Monster>();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    Option<Item<C>> result = control.get<Monster, C>(id);
+    Option<Item<C>> result = writer.get<Monster, C>(id);
 
     if (!result.has_value())
     {
@@ -44,21 +44,21 @@ auto test_get(EntityId id) -> Item<C>
 
 void test_create()
 {
-    Control<Monster> control = reg.get_control<Monster>();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    EntityId id = control.create(Monster(0, Position{1, 4}, Health{10}, Detector{5}), true);
+    EntityId id = writer.create(Monster(0, Position{1, 4}, Health{10}, Detector{5}), true);
 
-    if (control.get_index(id) != 0)
+    if (writer.get_index(id) != 0)
     {
         throw std::runtime_error("Incorrect entity index in entity metadata.");
     }
 
-    if (!control.is_archetype<Monster>(id))
+    if (!writer.is_type<Monster>(id))
     {
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
 
-    if (!control.has_component<Position>(id))
+    if (!writer.has_component<Position>(id))
     {
         throw std::runtime_error("Incorrect entity type in entity metadata.");
     }
@@ -99,20 +99,20 @@ void test_query()
 
 void test_populate()
 {
-    Control<Monster> control = reg.get_control<Monster>();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    control.populate(Monster(), 3);
+    writer.populate(Monster(), 3);
 }
 
 void test_remove()
 {
-    Control<Monster> control = reg.get_control<Monster>();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    control.remove(0);
+    writer.remove(0);
 
-    control.update();
+    writer.update();
 
-    if(control.is_alive(0))
+    if(writer.is_alive(0))
     {
         throw std::runtime_error("The entity was not removed properly.");
     }

@@ -30,6 +30,6 @@ using QueryTypes = Data<SingleQuery, DoubleQuery, TripleQuery, QuadQuery>;
 // EVENTS
 
 struct StartGame { int value; };
-struct QuitGame { int value; };
+struct QuitEvent { int value; };
 
-using EventTypes = Data<StartGame, QuitGame>;
+using EventTypes = Data<StartGame, QuitEvent>;

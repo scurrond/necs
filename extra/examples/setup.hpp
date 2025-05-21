@@ -1,60 +1,21 @@
 #pragma once 
 
-#include "../../necs.hpp"
+#include "../model.hpp"
 
-using namespace NECS;
+using namespace necs;
 
-// ----------------------------------------------------------------------------
-// Components
-// ----------------------------------------------------------------------------
-
-struct Name
-{
-    std::string value;
-};
-
-struct Position 
-{
-    size_t x;
-    size_t y;
-};
-
-struct Health
-{
-    int value;
-};
-
-// ----------------------------------------------------------------------------
-// Archetypes
-// ----------------------------------------------------------------------------
-
-using Monster = Data<Position, Name, Health>;
-
-// ----------------------------------------------------------------------------
-// Events
-// ----------------------------------------------------------------------------
-
-struct QuitEvent {};
-
-// ----------------------------------------------------------------------------
-// Registry data
-// ----------------------------------------------------------------------------
-
-using Archetypes = Data<Monster>;
-using Events = Data<QuitEvent>;
-using Singletons = Data<>;
-
-Registry<Archetypes, Events, Singletons> registry;
+Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
 
 int main() 
 {    
-    registry.populate(Monster(), 100);
+    auto writer = reg.get_writer();
+    auto query = reg.get_query<SingleQuery>();
 
-    for (auto [id, data] : registry.query_in<Monster, Name>())
+    writer.populate(Monster(), 100);
+
+    for (auto [pos] : query.iter())
     {
-        auto& [name] = data;
-
-        name.value = "New name";
+        pos.x--;
     }
 
     return 0;
@@ -62,131 +23,111 @@ int main()
 
 void create()
 {   
+    auto writer = reg.get_writer();
+
     // Adds a single monster to the system
-    registry.create(Monster());
+    writer.create(Monster());
 
     // Adds 100 monsters to the system, calls create under the hood
-    registry.populate(Monster(), 100);
+    writer.populate(Monster(), 100);
 };
 
 void events()
 {
-    // Subscribe to built in component events
-    registry.subscribe<DataUpdated<Name>>
-    ([](DataUpdated<Name> event){
-        // do stuff
-    });
+    auto listener = reg.get_listener<QuitEvent>();
 
-    // Subscribe to built in archetype events
-    registry.subscribe<DataUpdated<Monster>>
-    ([](DataUpdated<Monster> event){
-        // do stuff
-    });
-
-    // Subscribe to built in entity events
-    registry.subscribe<EntityCreated>
-    ([](EntityCreated event){
-        // do stuff
-    });
-
-    // Subscribe to custom events    
-    registry.subscribe<QuitEvent>
+    // Subscribe to events    
+    listener.subscribe
     ([](QuitEvent event){
         // do stuff
     });
 
     // Call events
-    registry.call(QuitEvent{});
+    listener.call(QuitEvent{});
 
     // Disable event listener 
-    registry.close<QuitEvent>();
+    listener.close();
 
     // Enable event listener
-    registry.open<QuitEvent>();
+    listener.open();
 }
 
 void manage()
 {
-    // Changes data after update is called
-    registry.queue(0, KILL);
-    registry.queue(1, SNOOZE);
-    registry.update();
+    auto writer = reg.get_writer();
 
-    // Changes data instantly
-    registry.execute(1, WAKE);
-    registry.execute(2, KILL);
-    registry.execute(3, SNOOZE);
+    // Queue data for removal
+    writer.remove(0);
+
+    // Commit changes
+    writer.update();
+
+    // Clean up dead memory
+    writer.trim<Monster>();
 }
 
 void check()
 {
-    // read-only location info reference for entity with id 0
-    auto& [type, index, state, id_lock] = registry.info(0);
-
-    // are there any entities of this archetype in living
-    registry.is_empty<Monster>();
-
-    // are there any entities of this archetype in sleeping
-    registry.is_empty<Monster>(true);
+    // read-only info struct
+    auto reader = reg.get_reader();
 
     // is the entity with id 0 a monster
-    registry.is_type<Monster>(0);
+    reader.is_type<Monster>(0);
 
-    // is the entity with id 0 dead
-    registry.is_state(0, DEAD);
+    // is the entity with id 0 alive
+    reader.is_alive(0);
 
     // can the entity's id be reused on death
-    registry.is_locked(0);
+    reader.is_locked(0);
 
     // does the entity have a name component
-    registry.has_component<Name>(0);
+    reader.has_component<Name>(0);
+
+    // does this archetype exist
+    reader.has_archetype<Monster>();
 }
 
 void access()
 {   
-    // VIEW returns nullopt if entity is dead or the type is incorrect
-    auto [name0] = registry.view<Monster, Name>(0).value();
+    // get a writer for all archetypes 
+    auto writer = reg.get_writer();
 
-    // GET panics if the type is incorrect or the entity is DEAD
-    auto [name3] =  registry.get<Monster, Name>(3);
+    // get a writer for specific archetypes 
+    auto writer2 = reg.get_writer<Monster, Tree>();
 
-    // FIND filters and iterates over every archetype, returns a view
-    auto [name1] = registry.find<Name>(1).value();
+    // GET returns nullopt if entity is dead or the type is incorrect
+    auto [p] = writer.get<Monster, Position>(0).value();
+
+    // FIND filters and iterates over every archetype that matches the components
+    auto [h] = writer2.find<Health>(1).value();
+
+    // ITER returns a storage iterator over some components
+    for (auto [d] : writer.iter<Monster, Detector>())
+    {
+        // do stuff
+    }
 }
 
 void query()
 {
-    // Query in a single archetype
-    auto iterator = registry.query_in<Monster, Name, Position>();
-
-    for (auto [id, data] : iterator)
-    {
-        auto& [name, position] = data;
-
-        name.value = "New name";
-    } 
-
-    // Query with different requirements
-    Query<Name> query = registry.query<Name>();
-    Query<Name> query_with = registry.query_with<Data<Position>, Name>();
-    Query<Name> query_without = registry.query_without<Data<Position>, Name>();
-    Query<Name> query_with_without = registry.query_with_without<Data<Position>, Data<Health>, Name>();
+    // Retrieve a query
+    auto query = reg.get_query<QuadQuery>();
 
     // Iterate with for loop 
-    for (auto [id, data] : query)
+    for (auto [id, health, pos, det] : query.iter())
     {
-        auto& [name] = data;
-
-        name.value = "New name";
+        health.value--;
+        pos.x++;
+        std::cout << "Target: " << det.target;
     }
 
     // Iterate with callback
-    query.for_each([](Extraction<Name> e) 
+    query.for_each([](Item<EntityId, Health, Position, Detector> item) 
     {
-        auto& [id, data] = e;
+        auto [id, health, pos, det] = item;
 
-        auto& [name] = data;
-
-        name.value = "New name";
+        health.value--;
+        pos.x++;
+        std::cout << "Target: " << det.target;
     });
 }

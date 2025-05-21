@@ -30,12 +30,12 @@ void benchmark(std::string msg, F func, int iterations = 1000)
 
 void benchmark_create()
 {
-    Control control = reg.get_control();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    benchmark("Create 3 components:", [&control](){
+    benchmark("Create 3 components:", [&writer](){
         for (int i = 0; i < entity_count; i++)
         {
-            control.create(Monster());
+            writer.create(Monster());
         }
     }, 1);
 }
@@ -71,25 +71,25 @@ void benchmark_query()
 
 void benchmark_iter()
 {
-    Control control = reg.get_control();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    benchmark("1-component iter: ", [&control](){
-        for (auto [h] : control.iter<Monster, Health>())
+    benchmark("1-component iter: ", [&writer](){
+        for (auto [h] : writer.iter<Monster, Health>())
         {
             h.value++;
         }
     });
 
-    benchmark("2-component iter: ", [&control](){
-        for (auto [h, p] : control.iter<Monster, Health, Position>())
+    benchmark("2-component iter: ", [&writer](){
+        for (auto [h, p] : writer.iter<Monster, Health, Position>())
         {
             h.value++;
             p.x++;
         }
     });
 
-    benchmark("3-component iter: ", [&control](){
-        for (auto [h, p, d] : control.iter<Monster, Health, Position, Detector>())
+    benchmark("3-component iter: ", [&writer](){
+        for (auto [h, p, d] : writer.iter<Monster, Health, Position, Detector>())
         {
             h.value++;
             p.x++;
@@ -97,8 +97,8 @@ void benchmark_iter()
         }
     });
 
-    benchmark("4-component iter: ", [&control](){
-        for (auto [id, h, p, d] : control.iter<Monster, EntityId, Health, Position, Detector>())
+    benchmark("4-component iter: ", [&writer](){
+        for (auto [id, h, p, d] : writer.iter<Monster, EntityId, Health, Position, Detector>())
         {
             h.value++;
             p.x++;
@@ -109,33 +109,64 @@ void benchmark_iter()
 
 void benchmark_get()
 {
-    Control control = reg.get_control();
+    Writer<Monster> writer = reg.get_writer<Monster>();
 
-    benchmark("1-component get: ", [&control](){
-        for (auto [id] : control.iter<Monster, EntityId>())
+    benchmark("1-component get: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
         {
-            auto [health] = control.get_component<Health>(id).value();
+            auto [health] = writer.get<Monster, Health>(id).value();
             health.value++;
         }
     });
 
-    benchmark("2-component get: ", [&control](){
-        for (auto [id] : control.iter<Monster, EntityId>())
+    benchmark("2-component get: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
         {
-            auto [health] = control.get_component<Health>(id).value();
-            auto [pos] = control.get_component<Position>(id).value();
+            auto [health, pos] = writer.get<Monster, Health, Position>(id).value();
 
             health.value++;
             pos.x++;         
         }
     });
 
-    benchmark("3-component get: ", [&control](){
-        for (auto [id] : control.iter<Monster, EntityId>())
+    benchmark("3-component get: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
         {
-            auto [health] = control.get_component<Health>(id).value();
-            auto [pos] = control.get_component<Position>(id).value();
-            auto [det] = control.get_component<Detector>(id).value();
+            auto [health, pos, det] = writer.get<Monster, Health, Position, Detector>(id).value();
+
+            health.value++;
+            pos.x++;   
+            det.target++;      
+        }
+    });
+}
+
+void benchmark_find()
+{
+    Writer<Monster> writer = reg.get_writer<Monster>();
+
+    benchmark("1-component find: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
+        {
+            auto [health] = writer.find<Health>(id).value();
+            health.value++;
+        }
+    });
+
+    benchmark("2-component find: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
+        {
+            auto [health, pos] = writer.find<Health, Position>(id).value();
+
+            health.value++;
+            pos.x++;         
+        }
+    });
+
+    benchmark("3-component find: ", [&writer](){
+        for (auto [id] : writer.iter<Monster, EntityId>())
+        {
+            auto [health, pos, det] = writer.find<Health, Position, Detector>(id).value();
 
             health.value++;
             pos.x++;   
@@ -159,6 +190,7 @@ int main(int argc, char* argv[])
     benchmark_iter();
     benchmark_query();
     benchmark_get();
+    benchmark_find();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 
