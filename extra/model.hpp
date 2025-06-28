@@ -2,7 +2,10 @@
 
 #include "../necs.hpp"
 
-using namespace necs;
+template <typename... Cs>
+using Item = ecs::item<Cs...>;
+
+using EntityId = ecs::id;
 
 // COMPONENTS
 
@@ -11,25 +14,16 @@ struct Detector { int target; };
 struct Position { float x; float y; };
 struct Name { std::string value; };
 
-// ARCHETYPES
+// GLOBAL WORLD
 
-using Monster = Archetype<Position, Health, Detector>;
-using Tree = Archetype<Position, Health>;
+inline ecs::world<Position, Health, Detector, Name> test_world;
 
-using ArchetypeTypes = Data<Monster, Tree>;
+// ITEMS & QUERIES
 
-// QUERIES
+using SingleItem = Item<Position>;
+using DoubleItem = Item<Position, Health>;
+using TripleItem = Item<Position, Health, Detector>;
 
-using SingleQuery = Query<For<Position>>;
-using DoubleQuery = Query<For<Position, Health>>;
-using TripleQuery = Query<For<EntityId, Health, const Detector>>;
-using QuadQuery = Query<For<EntityId, Health, Position, const Detector>>;
-
-using QueryTypes = Data<SingleQuery, DoubleQuery, TripleQuery, QuadQuery>;
-
-// EVENTS
-
-struct StartGame { int value; };
-struct QuitEvent { int value; };
-
-using EventTypes = Data<StartGame, QuitEvent>;
+inline auto single_q = test_world.iter<Position>();
+inline auto double_q =test_world.iter<Position, Health>();
+inline auto triple_q = test_world.iter<Position, Health, Detector>();

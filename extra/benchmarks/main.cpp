@@ -3,8 +3,6 @@
 
 #include "../model.hpp"
 
-Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
-
 int entity_count = 0;
 
 template <typename F>
@@ -30,146 +28,105 @@ void benchmark(std::string msg, F func, int iterations = 1000)
 
 void benchmark_create()
 {
-    Writer<Monster> writer = reg.get_writer<Monster>();
-
-    benchmark("Create 3 components:", [&writer](){
+    benchmark("Create 3 components:", [](){
         for (int i = 0; i < entity_count; i++)
         {
-            writer.create(Monster());
+            auto id = test_world.create();
+
+            test_world.add(id, Health{}, Position{}, Detector{});
         }
     }, 1);
 }
 
-void benchmark_query()
-{    
-    auto& single_query = reg.get_query<SingleQuery>();
-    auto& double_query = reg.get_query<DoubleQuery>();
-    auto& triple_query = reg.get_query<TripleQuery>();
-
-    benchmark("1-component query ", [&single_query](){
-        for (auto [pos] : single_query.iter())
+void benchmark_iter()
+{
+    benchmark("1-component iter ", [](){
+        for (auto [_, pos] : single_q)
         {
             pos.x++;
         }
     });
 
-    benchmark("2-component query ", [&double_query](){
-        for (auto  [pos, health]  : double_query.iter())
+    benchmark("2-component iter ", [](){
+
+        for (auto [_, pos, health] : double_q)
         {
             pos.x++;
             health.value++;
         }
     });
 
-    benchmark("3-component query ", [&triple_query](){
-        for (auto [id, health, detector] : triple_query.iter())
+    benchmark("3-component iter ", [](){
+        for (auto [_, pos, health, det] : triple_q)
         {
+            pos.x++;
             health.value++;
+            det.target++;  
         }
     });
 }
 
-void benchmark_iter()
+void benchmark_for_each()
 {
-    Writer<Monster> writer = reg.get_writer<Monster>();
-
-    benchmark("1-component iter: ", [&writer](){
-        for (auto [h] : writer.iter<Monster, Health>())
-        {
-            h.value++;
-        }
+    benchmark("1-component for each ", [](){
+        single_q.for_each([](SingleItem item)
+        {   
+            auto [_, pos ] = item;
+            pos.x++;
+        });
     });
 
-    benchmark("2-component iter: ", [&writer](){
-        for (auto [h, p] : writer.iter<Monster, Health, Position>())
-        {
-            h.value++;
-            p.x++;
-        }
+    benchmark("2-component for each ", [](){
+        double_q.for_each([](DoubleItem item)
+        {   
+            auto [_, pos, health ] = item;
+            pos.x++;
+            health.value++;
+        });
     });
 
-    benchmark("3-component iter: ", [&writer](){
-        for (auto [h, p, d] : writer.iter<Monster, Health, Position, Detector>())
-        {
-            h.value++;
-            p.x++;
-            d.target++;
-        }
-    });
-
-    benchmark("4-component iter: ", [&writer](){
-        for (auto [id, h, p, d] : writer.iter<Monster, EntityId, Health, Position, Detector>())
-        {
-            h.value++;
-            p.x++;
-            d.target++;
-        }
+    benchmark("3-component for each ", [](){
+        triple_q.for_each([](TripleItem item)
+        {   
+            auto [ _, pos, health, det ] = item;
+            pos.x++;
+            health.value++;
+            det.target++;      
+        });
     });
 }
 
 void benchmark_get()
 {
-    Writer<Monster> writer = reg.get_writer<Monster>();
-
-    benchmark("1-component get: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
+    benchmark("1-component get: ", [](){
+        for (auto id : test_world.read_dense<Health>())
         {
-            auto [health] = writer.get<Monster, Health>(id).value();
+            auto& health = test_world.get<Health>(id);
             health.value++;
         }
     });
 
-    benchmark("2-component get: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
+    benchmark("2-component get: ", [](){
+        for (auto id : test_world.read_dense<Health>())
         {
-            auto [health, pos] = writer.get<Monster, Health, Position>(id).value();
+            auto& health = test_world.get<Health>(id);
+            auto& pos = test_world.get<Position>(id);
 
             health.value++;
             pos.x++;         
         }
     });
 
-    benchmark("3-component get: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
+    benchmark("3-component get: ", [](){
+        for (auto id : test_world.read_dense<Health>())
         {
-            auto [health, pos, det] = writer.get<Monster, Health, Position, Detector>(id).value();
+            auto& health = test_world.get<Health>(id);
+            auto& pos = test_world.get<Position>(id);
+            auto& det = test_world.get<Detector>(id);
+
 
             health.value++;
-            pos.x++;   
-            det.target++;      
-        }
-    });
-}
-
-void benchmark_find()
-{
-    Writer<Monster> writer = reg.get_writer<Monster>();
-
-    benchmark("1-component find: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
-        {
-            auto [health] = writer.find<Health>(id).value();
-            health.value++;
-        }
-    });
-
-    benchmark("2-component find: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
-        {
-            auto [health, pos] = writer.find<Health, Position>(id).value();
-
-            health.value++;
-            pos.x++;         
-        }
-    });
-
-    benchmark("3-component find: ", [&writer](){
-        for (auto [id] : writer.iter<Monster, EntityId>())
-        {
-            auto [health, pos, det] = writer.find<Health, Position, Detector>(id).value();
-
-            health.value++;
-            pos.x++;   
+            pos.x++; 
             det.target++;      
         }
     });
@@ -188,9 +145,8 @@ int main(int argc, char* argv[])
 
     benchmark_create();
     benchmark_iter();
-    benchmark_query();
+    benchmark_for_each();
     benchmark_get();
-    benchmark_find();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

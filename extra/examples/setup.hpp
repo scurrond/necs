@@ -2,7 +2,7 @@
 
 #include "../model.hpp"
 
-using namespace necs;
+using namespace ecs;
 
 Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
 

@@ -1,132 +1,146 @@
 #include "../model.hpp"
+#include <iostream>
+#include <stdexcept>
 
-Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
-
-void test_subscribe()
-{
-    auto& listener = reg.get_listener<EntityCreated>();
-
-    listener.subscribe
-    ([](EntityCreated event){
-
-        Writer<Monster> writer = reg.get_writer<Monster>();
-
-        std::cout << "\n------------------------------------------------\n";
-        std::cout << "Created entity:" 
-        << "\n Id: " << event.id 
-        << "\n Type: " << writer.get_type(event.id).name()
-        << "\n Index: " << writer.get_index(event.id)
-        << "\n Alive: " << writer.is_alive(event.id);
-
-        if (!writer.is_alive(event.id))
-        {
-            throw std::runtime_error("Incorrect entity state in entity metadata.");
-        }
-
-        std::cout << "\n------------------------------------------------\n";
-    });
-}
+EntityId id; 
 
 template <typename C>
-auto test_get(EntityId id) -> Item<C>
+C& test_get(EntityId id)
 {
-    Writer<Monster> writer = reg.get_writer<Monster>();
+    C* result = test_world.try_get<C>(id);
 
-    Option<Item<C>> result = writer.get<Monster, C>(id);
-
-    if (!result.has_value())
+    if (!result)
     {
         throw std::runtime_error("Get failed.");
     }
 
-    return result.value();
+    return *result;
 }
 
 void test_create()
 {
-    Writer<Monster> writer = reg.get_writer<Monster>();
+    id = test_world.create();
 
-    EntityId id = writer.create(Monster(0, Position{1, 4}, Health{10}, Detector{5}), true);
-
-    if (writer.get_index(id) != 0)
-    {
-        throw std::runtime_error("Incorrect entity index in entity metadata.");
-    }
-
-    if (!writer.is_type<Monster>(id))
-    {
-        throw std::runtime_error("Incorrect entity type in entity metadata.");
-    }
-
-    if (!writer.has_component<Position>(id))
-    {
-        throw std::runtime_error("Incorrect entity type in entity metadata.");
-    }
+    auto& entity = test_world.read_entity(id);
 
     std::cout << "------------------------------------------------\n";
 
-    std::cout << "Components:";
+    std::cout << "Created entity:";
 
-    auto [det] = test_get<Detector>(id);
-    std::cout << "\n - Detector: target: " << det.target;
-
-    auto [pos] = test_get<Position>(id);
-    std::cout << "\n - Pos: x: " << pos.x << " y: " << pos.y;
-
-    auto [health] = test_get<Health>(id);
-    std::cout << "\n - Health: " << health.value;
+    std::cout << "\n - Group:  " << entity.group;
+    std::cout << "\n - Group index:  " << entity.group_index;
+    std::cout << "\n - Alive:  " << entity.alive;
 
     std::cout << "\n------------------------------------------------\n";
 };
 
-void test_query()
+void test_add()
 {
-    auto& query = reg.get_query<QuadQuery>();
+    test_world.add(id, Position{1, 4}, Health{10}, Detector{5}, Name{"H"});
 
-    for (auto [id, health, pos, det] : query.iter())
+    auto& entity = test_world.read_entity(id);
+
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Added components:";
+
+    std::cout << "\n - Group:  " << entity.group;
+    std::cout << "\n - Group index:  " << entity.group_index;
+    std::cout << "\n - Alive:  " << entity.alive;
+
+    auto& det = test_get<Detector>(id);
+    std::cout << "\n - Detector: target: " << det.target;
+
+    auto& pos = test_get<Position>(id);
+    std::cout << "\n - Pos: x: " << pos.x << " y: " << pos.y;
+
+    auto& health = test_get<Health>(id);
+    std::cout << "\n - Health: " << health.value;
+
+    auto& name = test_get<Name>(id);
+    std::cout << "\n - Name: " << name.value;
+
+    std::cout << "\n------------------------------------------------\n";
+}
+
+void test_remove()
+{
+    test_world.remove<Position>(id);
+
+    auto& entity = test_world.read_entity(id);
+
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Removed component:";
+
+    std::cout << "\n - Group:  " << entity.group;
+    std::cout << "\n - Group index:  " << entity.group_index;
+    std::cout << "\n - Alive:  " << entity.alive;
+
+    std::cout << "\n------------------------------------------------\n";
+}
+
+void test_destroy()
+{
+    test_world.destroy(id);
+
+    auto& entity = test_world.read_entity(id);
+
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Destroyed entity:";
+
+    std::cout << "\n - Group:  " << entity.group;
+    std::cout << "\n - Group index:  " << entity.group_index;
+    std::cout << "\n - Alive:  " << entity.alive;
+    std::cout << "\n - To reuse count:  " << test_world.read_catalog().to_reuse.size();
+
+    std::cout << "\n------------------------------------------------\n";
+}
+
+void test_iter()
+{
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Pre-iteration: ";
+    std::cout << "\n - Cached: " << test_world.is_cached<Health, Position, Detector>();
+
+    std::cout << "\n------------------------------------------------\n";
+
+    for (auto [id, health, pos, det] : test_world.iter<Health, Position, Detector>())
     {
         std::cout << "------------------------------------------------\n";
-        std::cout << "Components from query: ";
+
+        std::cout << "Iterating: ";
+
         std::cout << "\n - Health: " << health.value;
         std::cout << "\n - Position: x: " << pos.x << " y: " << pos.y;
         std::cout << "\n - Detector: target: " << det.target;
+
         std::cout << "\n------------------------------------------------\n";
 
         health.value++;
         pos.x++;
     };
-}
 
-void test_populate()
-{
-    Writer<Monster> writer = reg.get_writer<Monster>();
+    std::cout << "------------------------------------------------\n";
 
-    writer.populate(Monster(), 3);
-}
+    std::cout << "Post-iteration: ";
+    std::cout << "\n - Cached: " << test_world.is_cached<Health, Position, Detector>();
 
-void test_remove()
-{
-    Writer<Monster> writer = reg.get_writer<Monster>();
-
-    writer.remove(0);
-
-    writer.update();
-
-    if(writer.is_alive(0))
-    {
-        throw std::runtime_error("The entity was not removed properly.");
-    }
+    std::cout << "\n------------------------------------------------\n";
 }
 
 int main()
 {
     std::cout << "=== Running tests ===\n";
-    test_subscribe();
+    
     test_create();
-    test_query();
-    test_populate();
-    test_query();
+    test_add();
+    test_iter();
     test_remove();
+    test_destroy();
+
     std::cout << "=== Run succeeded ===\n";
 
     return 0;
