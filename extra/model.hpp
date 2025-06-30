@@ -4,7 +4,6 @@
 
 template <typename... Cs>
 using Item = ecs::item<Cs...>;
-
 using EntityId = ecs::id;
 
 // COMPONENTS
@@ -24,6 +23,6 @@ using SingleItem = Item<Position>;
 using DoubleItem = Item<Position, Health>;
 using TripleItem = Item<Position, Health, Detector>;
 
-inline auto single_q = test_world.iter<Position>();
-inline auto double_q =test_world.iter<Position, Health>();
-inline auto triple_q = test_world.iter<Position, Health, Detector>();
+inline auto single_q = test_world.create_query<Position>();
+inline auto double_q =test_world.create_query<Position, Health>();
+inline auto triple_q = test_world.create_query<Position, Health, Detector>();
