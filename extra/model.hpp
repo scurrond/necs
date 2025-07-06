@@ -29,6 +29,7 @@ struct Texture {};
 
 // GLOBAL WORLD
 
+using WorldData = ecs::world_data<Position, Health, Detector, Name, Sprite, Collider, Rotation, Scale, Shape, Gravity, Velocity, Damage, Hurtbox, Hitbox, Material, Texture>;
 struct World : public ecs::world<Position, Health, Detector, Name, Sprite, Collider, Rotation, Scale, Shape, Gravity, Velocity, Damage, Hurtbox, Hitbox, Material, Texture> {};
 inline World test_world;
 
@@ -73,4 +74,26 @@ inline void explode_archetypes()
     (test_world);
 
     std::cout << "\nArchetype count: " << test_world.read().archetypes.size << "\n";
+}
+
+inline void log_metadata()
+{
+    const WorldData& data = test_world.read();
+
+    std::cout << "\n------------------------------------------------"
+
+    << "\n" << "Metadata"
+    << "\n - Archetype count: " << data.archetypes.size
+    << "\n - Entity count: " << data.entities.size
+    << "\n - Group count: " << data.groups.size
+    << "\n - Memory usage: " 
+    << "\n ---- Groups: "  << ecs::memory_usage(data.groups) / 1000 << " KB"
+    << "\n ---- Entities: "  << ecs::memory_usage(data.entities) / 1000  << " KB"
+    << "\n ---- Components: "  << ecs::memory_usage<Position, Health, Detector, Name, Sprite, Collider, Rotation, Scale, Shape, Gravity, Velocity, Damage, Hurtbox, Hitbox, Material, Texture>(data.components) / 1000  << " KB"
+    << "\n ---- Archetypes: "  << ecs::memory_usage(data.archetypes) / 1000  << " KB"
+    << "\n ---- Archetype index map: "  << ecs::memory_usage(data.archetype_index_map) / 1000  << " KB"
+    << "\n ---- Group index map: "  << ecs::memory_usage(data.group_index_map) / 1000  << " KB"
+    << "\n ---- Total: "  << ecs::memory_usage(data) / 1000  << " KB"
+
+    << "\n------------------------------------------------";
 }

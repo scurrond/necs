@@ -58,7 +58,7 @@ namespace ecs
     // ----------------------------------------------------------------------------
 
     template <typename... Cs>
-    using component_table = std::tuple<store<Cs>...>; // stores at the component type, pools at the archetype index
+    using component_table = std::tuple<store<Cs>...>;
 
     struct entity_table
     {
@@ -120,7 +120,7 @@ namespace ecs
 
         group_table<N>&         groups;            // group table reference
         archetype_table<N>&     archetypes;        // archetype table reference
-        extraction<Cs...> stores;            // matching component stores
+        extraction<Cs...>       stores;            // matching component stores
     };
 
     template <size_t N, typename... Cs>
@@ -665,11 +665,11 @@ namespace ecs
             }
 
             template <typename... Ts, typename Callback, typename... Fs>
-            void iter(Callback&& _callback, query_filter<Fs...> _filter = query_filter<>{}) 
+            void iter(Callback&& _callback, query_filter<Fs...> = query_filter<>{}) 
             {
                 if (std::is_invocable_v<Callback, item<Ts...>>)
                 {
-                    size_t _group_index = get_group<Ts...>(_filter);
+                    size_t _group_index = get_group<Ts...>(typename query_filter<Fs...>::params{});
 
                     std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[_group_index];
 
@@ -717,4 +717,95 @@ namespace ecs
                 return m_data;
             }
     };
+
+
+    // ----------------------------------------------------------------------------
+    // Memory usage
+    // ----------------------------------------------------------------------------
+
+    template <typename C>
+    inline auto memory_usage(const store<C>& _store) -> float
+    {
+        size_t _total = 0;
+
+        _total += sizeof(store<C>);
+        _total += _store.capacity() * sizeof(pool<C>);
+
+        for (const pool<C>& _pool : _store)
+        {
+            _total += _pool.capacity() * sizeof(C);
+        }
+
+        return _total;
+    }
+
+    template <typename... Cs>
+    inline auto memory_usage(const component_table<Cs...>& _components) -> float
+    {
+        return (memory_usage<Cs>(std::get<store<Cs>>(_components)) + ...);
+    };
+
+    template <size_t N>
+    inline auto memory_usage(const archetype_table<N>& _archetypes) -> float
+    {
+        size_t _total = sizeof(_archetypes);
+
+        _total += _archetypes.end.capacity()         * sizeof(size_t);
+        _total += _archetypes.total.capacity()       * sizeof(size_t);
+        _total += _archetypes.mask.capacity()        * sizeof(bitmask<N>);
+        _total += _archetypes.entity_ids.capacity()  * sizeof(std::vector<id>);
+
+        for (const auto& vec : _archetypes.entity_ids)
+        {
+            _total += vec.capacity() * sizeof(id);
+        }
+
+        return _total;
+    };
+
+    inline auto memory_usage(const entity_table& _entities) -> float
+    {
+        return sizeof(_entities)
+            + _entities.component_index.capacity() * sizeof(size_t)
+            + _entities.archetype_index.capacity() * sizeof(size_t);
+    };
+
+    template <size_t N>
+    inline auto memory_usage(const group_table<N>& _groups) -> float
+    {
+        size_t _total = sizeof(_groups);
+
+        _total += _groups.mask.capacity() * sizeof(bitmask<N * 2>);
+        _total += _groups.archetype_indices.capacity() * sizeof(std::vector<size_t>);
+
+        for (const auto& vec : _groups.archetype_indices)
+        {
+            _total += vec.capacity() * sizeof(size_t);
+        }
+
+        return _total;
+    };
+
+    template <typename K, typename V>
+    inline auto memory_usage(const std::unordered_map<K, V>& _map) -> float
+    {
+        size_t _total = sizeof(_map);
+
+        _total += _map.bucket_count() * sizeof(void*);
+
+        _total += _map.size() * (sizeof(K) + sizeof(V) + sizeof(void*)); 
+
+        return _total;
+    }
+
+    template <typename... Cs>
+    inline auto memory_usage(const world_data<Cs...>& _data) -> float
+    {
+        return memory_usage(_data.groups)
+            + memory_usage(_data.archetypes)
+            + memory_usage(_data.entities)
+            + memory_usage<Cs...>(_data.components)
+            + memory_usage(_data.archetype_index_map)
+            + memory_usage(_data.group_index_map);
+    }
 };

@@ -178,7 +178,7 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
-    // explode_archetypes();
+    explode_archetypes();
 
     benchmark_create();
     benchmark_query();
@@ -191,8 +191,11 @@ int main(int argc, char* argv[])
     benchmark_add();
     benchmark_remove();
 
+    log_metadata();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
+
+
 
     return 0;
 }
