@@ -2,40 +2,41 @@
 #include <iostream>
 #include <stdexcept>
 
-EntityId id; 
+inline EntityId id = 0;
 
 template <typename C>
 C& test_get(EntityId id)
 {
-    C* result = test_world.try_get_component<C>(id);
+    auto result = test_world.try_get<C>(id);
 
     if (!result)
     {
         throw std::runtime_error("Get failed.");
     }
 
-    return *result;
+    return std::get<C&>(result.value());
 }
 
 void test_create()
 {
-    id = test_world.create_entity();
+    id = test_world.create();
 
-    test_world.add_components(
+    test_world.add(
         id,       
         Position{1, 4}, 
         Health{10}, 
         Detector{5}
     );
 
-    auto& entity = test_world.get_entity(id);
+    const auto& data = test_world.read();
 
     std::cout << "------------------------------------------------\n";
 
     std::cout << "Created entity:";
 
-    std::cout << "\n - Archetype index:  " << entity.archetype_index;
-    std::cout << "\n - Component index:  " << entity.component_index;
+    std::cout << "\n - Id:  " << id;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
 
     std::cout << "\nComponents:";
 
@@ -53,16 +54,17 @@ void test_create()
 
 void test_add()
 {
-    test_world.add_component(id, Name{"HHHH"});
+    test_world.add(id, Name{"HHHH"});
 
-    auto& entity = test_world.get_entity(id);
+    const auto& data = test_world.read();
 
     std::cout << "------------------------------------------------\n";
 
     std::cout << "Added component:";
 
-    std::cout << "\n - Archetype index:  " << entity.archetype_index;
-    std::cout << "\n - Component index:  " << entity.component_index;
+    std::cout << "\n - Id:  " << id;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
 
     std::cout << "\nComponents:";
 
@@ -83,16 +85,17 @@ void test_add()
 
 void test_remove()
 {
-    test_world.remove_component<Position>(id);
+    test_world.remove<Position>(id);
 
-    auto& entity = test_world.get_entity(id);
+    const auto& data = test_world.read();
 
     std::cout << "------------------------------------------------\n";
 
     std::cout << "Removed component:";
 
-    std::cout << "\n - Archetype index:  " << entity.archetype_index;
-    std::cout << "\n - Component index:  " << entity.component_index;
+    std::cout << "\n - Id:  " << id;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
 
     std::cout << "\nComponents:";
 
@@ -110,32 +113,33 @@ void test_remove()
 
 void test_destroy()
 {
-    test_world.destroy_entity(id);
+    test_world.destroy(id);
 
-    auto& entity = test_world.get_entity(id);
+    const auto& data = test_world.read();
 
     std::cout << "------------------------------------------------\n";
 
     std::cout << "Destroyed entity:";
 
-    std::cout << "\n - Archetype index:  " << entity.archetype_index;
-    std::cout << "\n - Component index:  " << entity.component_index;
+    std::cout << "\n - Id:  " << id;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
 
     std::cout << "\n------------------------------------------------\n";
 }
 
-void test_iter()
+void test_query()
 {
+    const auto& data = test_world.read();
+
     for (auto [id, pos, health, det] : triple_q)
     {
-        auto& entity = test_world.get_entity(id);
-
         std::cout << "------------------------------------------------\n";
 
         std::cout << "Querying entity:";
         std::cout << "\n - Id:  " << id;
-        std::cout << "\n - Archetype index:  " << entity.archetype_index;
-        std::cout << "\n - Component index:  " << entity.component_index;
+        std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
+        std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
         std::cout << "\nComponents:";
         std::cout << "\n - Health: " << health.value;
         std::cout << "\n - Position: x: " << pos.x << " y: " << pos.y;
@@ -148,53 +152,82 @@ void test_iter()
     };
 }
 
+void test_queue()
+{
+    test_world.queue([](){
+        std::cout << "------------------------------------------------\n";
+
+        std::cout << "Executing queue entry";
+        std::cout << "\n - Id:  " << id;
+
+        std::cout << "\n------------------------------------------------\n";
+
+        test_create();
+
+        std::cout << "------------------------------------------------\n";
+
+        std::cout << "Executed queue entry";
+
+        std::cout << "\n------------------------------------------------\n";
+    });
+}
+
+void test_update()
+{
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Executing update";
+
+    std::cout << "\n------------------------------------------------\n";
+
+    test_world.update();
+
+    std::cout << "------------------------------------------------\n";
+
+    std::cout << "Executed update";
+
+    std::cout << "\n------------------------------------------------\n";
+}
+
 int main()
 {
     std::cout << "=== Running tests ===\n";
     
     test_create();
-    test_create();
-    test_create();
-    test_create();
-
     test_add();
-    test_iter();
+    test_query();
     test_remove();
-    test_destroy();
+    // test_destroy();
 
-    auto reader = test_world.create_reader();
+    // test_queue();
+    // test_update();
 
-    for (auto& archetype : reader.readonly_archetypes)
-    {   
+    const auto& data = test_world.read();
+
+    for (size_t i = 0; i < data.archetypes.size; i++)
+    {
         std::cout << "------------------------------------------------\n";
 
         std::cout << "Archetype: ";
-        std::cout << "\n - End: " << archetype.end;
-        std::cout << "\n - Total: " << archetype.total;
+        std::cout << "\n - Index: " << i;
+        std::cout << "\n - End: " << data.archetypes.end.at(i);
+        std::cout << "\n - Total: " << data.archetypes.total.at(i);
 
         std::cout << "\n - Bitmask: ";
-        for (size_t i = 0; i < archetype.mask.size(); i++)
+        for (size_t j = 0; j < data.archetypes.mask.at(i).size(); j++)
         {
-            std::cout << archetype.mask.test(i);
+            std::cout << data.archetypes.mask.at(i).test(j);
         }
 
         std::cout << "\n - Entities: ";
-        for (size_t i = 0; i < archetype.end; i++)
+        for (size_t j = 0; j < data.archetypes.end.at(i); j++)
         {
-            std::cout << "\n ---- Id " << i << ": " << archetype.entities.at(i);
-        }
-
-        std::cout << "\n - Pools: ";
-        for (size_t i = 0; i < archetype.end; i++)
-        {   
-            if (archetype.mask.test(i))
-            {
-                std::cout << "\n ---- Pool index " << i << ": " << archetype.pools.at(i);
-            }
+            std::cout << "\n ---- id " << j << ": " << data.archetypes.entity_ids.at(i).at(j);
         }
 
         std::cout << "\n------------------------------------------------\n";
     }
+
 
     std::cout << "=== Run succeeded ===\n";
 

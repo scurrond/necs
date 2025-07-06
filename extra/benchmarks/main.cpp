@@ -31,13 +31,49 @@ void benchmark_create()
     benchmark("Create 3 components:", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            auto id = test_world.create_entity();
+            auto id = test_world.create();
 
-            test_world.add_components(id, Health{}, Position{}, Detector{});
+            test_world.add(id, Health{}, Position{}, Detector{});
         }
 
     }, 1);
+}
 
+void benchmark_destroy()
+{
+    benchmark("Destroy:", [](){
+        for (size_t i = 0; i < entity_count; i++)
+        {
+            test_world.destroy(i);
+        }
+
+    }, 1);
+}
+
+void benchmark_iter()
+{
+    benchmark("1-component iter ", [](){
+        single_q.iter([](SingleItem item){
+            auto [_, pos]  = item;
+            pos.x++;
+        });
+    });
+
+    benchmark("2-component iter ", [](){
+        double_q.iter([](DoubleItem item){
+            auto [_, pos, health]  = item;
+            health.value += pos.x;
+        });
+    });
+
+    benchmark("3-component iter ", [](){
+        triple_q.iter([](TripleItem item){
+            auto [_, pos, health, det]  = item;
+            pos.x++;
+            health.value++;
+            det.target++;  
+        });
+    });
 }
 
 void benchmark_query()
@@ -53,8 +89,7 @@ void benchmark_query()
 
         for (auto [_, pos, health] : double_q)
         {
-            pos.x++;
-            health.value++;
+            health.value += pos.x;
         }
     });
 
@@ -68,49 +103,19 @@ void benchmark_query()
     });
 }
 
-void benchmark_iter()
-{
-    benchmark("1-component iter ", [](){
-        single_q.for_each([](SingleItem item)
-        {   
-            auto [_, pos ] = item;
-            pos.x++;
-        });
-    });
-
-    benchmark("2-component iter ", [](){
-        double_q.for_each([](DoubleItem item)
-        {   
-            auto [_, pos, health ] = item;
-            pos.x++;
-            health.value++;
-        });
-    });
-
-    benchmark("3-component iter ", [](){
-        triple_q.for_each([](TripleItem item)
-        {   
-            auto [ _, pos, health, det ] = item;
-            pos.x++;
-            health.value++;
-            det.target++;      
-        });
-    });
-}
-
 void benchmark_remove()
 {
     benchmark("1-component remove: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.remove_component<Health>(i);
+            test_world.remove<Health>(i);
         }
     }, 1);
 
     benchmark("2-component remove: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.remove_components<Position, Detector>(i);
+            test_world.remove<Position, Detector>(i);
         }
     }, 1);
 }
@@ -120,14 +125,14 @@ void benchmark_add()
     benchmark("1-component add: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.add_component(i, Health{});
+            test_world.add(i, Health{});
         }
     }, 1);
 
     benchmark("2-component add: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.add_components(i, Position{}, Detector{});
+            test_world.add(i, Position{}, Detector{});
         }
     }, 1);
 }
@@ -137,7 +142,7 @@ void benchmark_get()
     benchmark("1-component get: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            auto& health = test_world.get_component<Health>(i);
+            auto [ health ] = test_world.get<Health>(i);
             health.value++;
         }
     });
@@ -145,7 +150,7 @@ void benchmark_get()
     benchmark("2-component get: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            auto [ pos, health ] = test_world.get_components<Position, Health>(i);
+            auto [ pos, health ] = test_world.get<Position, Health>(i);
             health.value++;
             pos.x++;  
         }
@@ -154,7 +159,7 @@ void benchmark_get()
     benchmark("3-component get: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            auto [ pos, health, det ] = test_world.get_components<Position, Health, Detector>(i);
+            auto [ pos, health, det ] = test_world.get<Position, Health, Detector>(i);
             health.value++;
             pos.x++;  
             det.target++;      
@@ -173,12 +178,19 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
+    // explode_archetypes();
+
     benchmark_create();
     benchmark_query();
     benchmark_iter();
     benchmark_get();
     benchmark_remove();
     benchmark_add();
+    benchmark_destroy();
+    benchmark_create();
+    benchmark_add();
+    benchmark_remove();
+
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

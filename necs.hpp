@@ -1,24 +1,45 @@
 #pragma once 
 
 #include <algorithm>
-#include <array>
 #include <bitset>
+#include <cassert>
 #include <cstddef>
 #include <functional>
 #include <optional>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace ecs
 {
     // ----------------------------------------------------------------------------
-    // Template meta
+    // Basic definitions
     // ----------------------------------------------------------------------------
 
-    template <typename T>
-    struct empty {};
+    using id = size_t;
+
+    using task = std::function<void()>;
+
+    template <size_t N>
+    using bitmask = std::bitset<N>;
+
+    template <typename C>
+    using pool = std::vector<std::remove_const_t<C>>;
+
+    template <typename C>
+    using store = std::vector<pool<C>>;
+
+    template <typename... Cs>
+    using extraction = std::tuple<store<Cs>&...>;
+
+    template <typename... Cs>
+    using item = std::tuple<const id&, Cs&...>;
+
+    // ----------------------------------------------------------------------------
+    // Template meta
+    // ----------------------------------------------------------------------------
 
     template <typename T, typename Tuple>
     struct index_of;
@@ -30,410 +51,395 @@ namespace ecs
     struct index_of<T, std::tuple<U, Ts...>> : std::integral_constant<size_t, 1 + index_of<std::remove_const_t<T>, std::tuple<Ts...>>::value> {};
 
     template <typename Tuple, typename... Ts>
-    struct indices_of 
+    struct indices_of { using type = std::index_sequence<index_of<Ts, Tuple>::value...>; };
+
+    // ----------------------------------------------------------------------------
+    // Tables
+    // ----------------------------------------------------------------------------
+
+    template <typename... Cs>
+    using component_table = std::tuple<store<Cs>...>; // stores at the component type, pools at the archetype index
+
+    struct entity_table
     {
-        using type = std::index_sequence<index_of<Ts, Tuple>::value...>;
+        size_t size = 0;
+        
+        std::vector<size_t> component_index;        // stores the location of the entity's components
+        std::vector<size_t> archetype_index;        // stores the location of the entity's archetype
+    };  
+
+    template <size_t N>
+    struct archetype_table
+    {      
+        size_t size = 0;
+     
+        std::vector<size_t>          end;              // the last viable (non-dead) index across each pool 
+        std::vector<size_t>          total;            // the last initialized index across each pool
+        std::vector<bitmask<N>>      mask;             // the bitmask of the archetype
+        std::vector<std::vector<id>> entity_ids;       // entities in this archetype at their component index
     };
 
-    template <typename Tuple, typename... Ts>
-    using indices_of_t = indices_of<Tuple, Ts...>::type;
-
-    // ----------------------------------------------------------------------------
-    // Basic defintions
-    // ----------------------------------------------------------------------------
-
-    // Reausable unique id per entity.
-    using id = size_t;
-
-    template <size_t N> 
-    using bitmask = std::bitset<N>;
-    
-    // Queueable function.
-    using task = std::function<void()>;
-
-    // Item returned by queries.
-    template <typename... Cs>
-    using item = std::tuple<const id&, Cs&...>;
-
-    // ----------------------------------------------------------------------------
-    // Data storage
-    // ----------------------------------------------------------------------------
-
-    // Entity location.
-    struct entity 
+    template <size_t N>
+    struct group_table
     {
-        size_t archetype_index;        // entity's archetype index
-        size_t component_index;        // entity's component index
+        size_t size = 0;
+
+        std::vector<bitmask<N * 2>>      mask;               // the bitmask of the group
+        std::vector<std::vector<size_t>> archetype_indices;  // archetype indices matching the group
     };
 
-    // Archetype-level storage.
-    template <size_t N> 
-    struct archetype            
-    {   
-        size_t end;                     // final valid entity
-        size_t total;                   // pool size
-        bitmask<N> mask;                // unique archetype mask
-        std::vector<id> entities;       // entities in this store at their component index
-        std::array<size_t, N> pools;    // indices to component vectors inside their pools
-    }; 
-
-    using tasks = std::vector<task>;
-    using group = std::vector<size_t>;      // A size_t vector alias containing the store indices matching a query.
-    using groups = std::vector<group>;
-    using entities = std::vector<entity>;
-    template <typename C>
-    using pool = std::vector<C>;            // Vector alias, base component store.
-    template <typename C>
-    using store = std::vector<pool<C>>;     // Stores a 2D vector of pools.
-    template <typename... Cs>
-    using stores = std::tuple<store<Cs>...>;
-    template <size_t N>
-    using archetypes = std::vector<archetype<N>>;
-    template <size_t N>
-    using bitmask_index = std::unordered_map<bitmask<N>, size_t>;
-
     // ----------------------------------------------------------------------------
-    // Query
+    // Query 
     // ----------------------------------------------------------------------------
-    
-    template <typename... Ts>
-    struct with {};
 
     template <typename... Ts>
-    struct without {};
+    struct include {};
 
     template <typename... Ts>
-    struct query_param;
-
-    template <typename... Ws, typename... Wos>
-    struct query_param<with<Ws...>, without<Wos...>> {};  
-
-    template <typename... Wos>
-    struct query_param<without<Wos...>, with<>>{};  
-
-    template <typename... Ws>
-    struct query_param<with<Ws...>, without<>>{};
+    struct exclude {};
 
     template <typename... Ts>
-    struct query;
+    struct query_filter;
 
-    template <typename C, typename Param>
-    struct query<C, Param> {};
+    template <>
+    struct query_filter<> { using params = query_filter<include<>, exclude<>>; };
 
-    template <typename... Cs, typename Param>
-    struct query<std::tuple<Cs...>, Param> {};
+    template <typename... Incs>
+    struct query_filter<include<Incs...>> { using params = query_filter<include<Incs...>, exclude<>>; };
 
-    // Key for storing query groups.
-    template <size_t N> 
-    using query_singature = std::tuple<bitmask<N>, bitmask<N>, bitmask<N>>;
+    template <typename... Excs>
+    struct query_filter<exclude<Excs...>> { using params = query_filter<include<>, exclude<Excs...>>; };
 
-    /**
-    * Component iterator.
-    * @tparam N The number of components in the system.
-    * @tparam Is... Index sequence consiting of the indices of Cs... in the world.
-    * @tparam Cs... The components to extract.
-    */
-    template <size_t N, typename Seq , typename... Cs>
-    class query_result
+    template <typename... Incs, typename... Excs>
+    struct query_filter<include<Incs...>, exclude<Excs...>> { using params = query_filter<include<Incs...>, exclude<Excs...>>; };
+
+    template <size_t N, typename... Cs>
+    struct query_data
     {
-        using q = query_result<N, Seq, Cs...>;
+        size_t                  group_index;       // the query's group index
 
-        size_t m_group_index;                           // the index of the group of this query
-        groups& m_groups;                               // reference to groups
-        entities& m_entities;                           // reference to entities
-        archetypes<N>& m_archetypes;                    // reference to archetypes
-        std::tuple<store<Cs>&...> m_stores;             // reference to the matching stores
+        group_table<N>&         groups;            // group table reference
+        archetype_table<N>&     archetypes;        // archetype table reference
+        extraction<Cs...> stores;            // matching component stores
+    };
 
-        template <size_t I, typename C>
-        C& get_component(const size_t& _component_index, archetype<N>& _archetype)
+    template <size_t N, typename... Cs>
+    class query_range
+    {
+        query_data<N, Cs...>& m_data;               // reference to the range's result
+
+        size_t m_current_component = 0;             // current entity component index in archetype group
+        size_t m_current_archetype = 0;             // current archetype index in at this index in m_data.groups
+
+        void advance()
         {
-            store<C>& _store = std::get<store<C>&>(m_stores);
+            std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[m_data.group_index];
 
-            size_t _pool_index = _archetype.pools.at(I);
-
-            pool<C>& _pool = _store.at(_pool_index);
-
-            return _pool.at(_component_index);
-        }
-
-        template <size_t... Is>
-        item<Cs...> get_item(const id& _id, const size_t& _component_index,  archetype<N>& _archetype, std::index_sequence<Is...>)
-        {
-            return std::tie(_id, get_component<Is, Cs>(_component_index, _archetype)...);
+            while(m_current_archetype < _archetype_indices.size())
+            {   
+                if (m_current_component >= m_data.archetypes.end[_archetype_indices[m_current_archetype]]) // skips empty as well
+                {
+                    m_current_archetype++;     
+                    m_current_component = 0;    
+                }
+                else 
+                {
+                    break;
+                }
+            }
         }
 
         public:
 
-            query_result(size_t _group_index, groups& _groups, entities& _entities, archetypes<N>& _archetypes, std::tuple<store<Cs>&...> _stores)
-            : m_group_index(_group_index), m_groups(_groups), m_entities(_entities), m_archetypes(_archetypes), m_stores(_stores) {}
+            query_range(query_data<N, Cs...>& _data)
+            : m_data(_data) { advance(); }
 
-            class iterator
-            {   
-                q& m_query;                                     // parent query
+            query_range(query_data<N, Cs...>& _data, size_t&& _last_archetype)
+            : m_data(_data), m_current_archetype(_last_archetype) {}
 
-                group& m_group;                                 // the group of the underlying query
-                std::tuple<pool<Cs>*...> m_pools;               // current extracted pools 
+            bool operator!=(const query_range<N, Cs...>& _other)
+            {
+                return _other.m_current_archetype != m_current_archetype
+                || _other.m_current_component != m_current_component;
+            }
 
-                size_t m_current_entity_index = 0;              // current entity in archetype group
-                size_t m_current_group_index = 0;               // current archetype index in at this index in m_groups
-                int m_prev_valid_group_index = -1;              // keeps track in order to set pools       
+            auto operator++() -> query_range<N, Cs...>&
+            {
+                m_current_component++;
 
-                template <typename C>
-                C& get_component(size_t& _component_index)
-                {
-                    return std::get<pool<C>*>(m_pools) -> at(_component_index);
-                }
+                advance();
 
-                template <size_t I, typename C>
-                pool<C>* get_pool(archetype<N>& _archetype)
-                {
-                    store<C>& _store = std::get<store<C>&>(m_query.m_stores);
+                return *this;
+            }
 
-                    size_t _pool_index = _archetype.pools.at(I);
+            auto operator*() -> item<Cs...>
+            {
+                std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[m_data.group_index];
 
-                    pool<C>& _pool = _store.at(_pool_index);
+                size_t _archetype_index = _archetype_indices[m_current_archetype];
 
-                    return &_pool;
-                }
+                id& _id = m_data.archetypes.entity_ids[_archetype_index][m_current_component];
 
-                template <size_t... Is>
-                void set_pools(std::index_sequence<Is...>)
-                {
-                    size_t _archetype_index = m_group.at(m_current_group_index);
-                    archetype<N>& _archetype = m_query.m_archetypes.at(_archetype_index);
+                return std::tie<const id, Cs...>(_id, std::get<store<Cs>&>(m_data.stores)[_archetype_index][m_current_component]...);
+            }
+    };
 
-                    m_pools = std::make_tuple(get_pool<Is, Cs>(_archetype)...);
-                }
+    template <size_t N, typename... Cs>
+    class query_result
+    {
+        query_data<N, Cs...> m_data; 
 
-                void advance()
-                {
-                    while(m_current_group_index < m_group.size())
-                    {
-                        size_t& _archetype_index = m_group.at(m_current_group_index);
-                        archetype<N>& _archetype = m_query.m_archetypes.at(_archetype_index);
+        template <typename C>
+        auto get_pool(size_t& _archetype_index) -> pool<C>&
+        {
+            return std::get<store<C>&>(m_data.stores)[_archetype_index];
+        }
 
-                        if (m_current_entity_index >= _archetype.end) // skips empty as well
-                        {
-                            m_current_group_index++;       // increase group
-                            m_current_entity_index = 0;    // reset entity index
-                        }
-                        else 
-                        {
-                            // extract pools
-                            if (m_prev_valid_group_index < (int)m_current_group_index)
-                            {
-                                set_pools(Seq{});
-                                m_prev_valid_group_index = (int)m_current_group_index;
-                            }
+        public:
 
-                            break;
-                        }
-                    }
-                }
+            query_result(query_data<N, Cs...>&& _data)
+            : m_data(_data) {}
 
-                public:
-
-                    iterator(q& _query)
-                    : m_query(_query), m_group(_query.m_groups.at(_query.m_group_index)) { advance(); }
-
-                    iterator(q& _query, size_t _last_group_index)
-                    : m_query(_query), m_group(_query.m_groups.at(_query.m_group_index)), m_current_group_index(_last_group_index) {}
-
-                    bool operator!=(const iterator& _other)
-                    {
-                        return _other.m_current_group_index != m_current_group_index
-                        || _other.m_current_entity_index != m_current_entity_index;
-                    }
-
-                    iterator& operator++()
-                    {
-                        m_current_entity_index++;
-
-                        advance();
-
-                        return *this;
-                    }
-
-                    item<Cs...> operator*()
-                    {
-                        size_t _archetype_index = m_group.at(m_current_group_index);
-                        id& _id = m_query.m_archetypes.at(_archetype_index).entities.at(m_current_entity_index);
-                        entity& _entity = m_query.m_entities.at(_id);
-
-                        return std::tie<const id, Cs...>(_id, get_component<Cs>(_entity.component_index)...);
-                    }
-            };
+            auto read() const -> const query_data<N, Cs...>&
+            {
+                return m_data;
+            }
 
             template <typename Callback>
-            void for_each(Callback&& _callback)
+            void iter(Callback&& _callback) 
             {
-                if constexpr (std::is_invocable_v<Callback, item<Cs...>>)
+                if (std::is_invocable_v<Callback, item<Cs...>>)
                 {
-                    group& _group = m_groups.at(m_group_index);
+                    std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[m_data.group_index];
 
-                    for (size_t& _archetype_index : _group)
+                    for (size_t& _archetype_index : _archetype_indices)
                     {
-                        archetype<N>& _archetype = m_archetypes[_archetype_index];
+                        std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
 
-                        for (auto& _id : _archetype.entities)
+                        for (size_t _component_index = 0; _component_index < m_data.archetypes.end[_archetype_index]; _component_index++)
                         {
-                            entity& _entity = m_entities.at(_id);
-                            _callback(get_item(_id, _entity.component_index, _archetype, Seq{}));
+                            const id& _id = _entity_ids[_component_index];
+
+                            _callback(std::tie(_id, get_pool<Cs>(_archetype_index)[_component_index]...));
                         }
                     }
                 }
             }
 
-            iterator begin()
+            auto begin() -> query_range<N, Cs...>
             {
-                return iterator(*this);
+                return query_range<N, Cs...>(m_data);
             }
 
-            iterator end()
+            auto end() -> query_range<N, Cs...> 
             {
-                return iterator(*this, m_groups.at(m_group_index).size());
+                return query_range<N, Cs...>(m_data, m_data.groups.archetype_indices[m_data.group_index].size());
             }
     };
-    
+
     // ----------------------------------------------------------------------------
-    // Data access
+    // World 
     // ----------------------------------------------------------------------------
 
-    // Simple object that gives readonly access to data.
-    template <size_t N, typename... components>
-    struct reader
+    struct world_queue 
     {
-        const groups& readonly_groups;                           // available query groups
-        const entities& readonly_entities;                       // available entities at their id
-        const archetypes<N>& readonly_archetypes;                // available archetypes 
-        const stores<components...>& readonly_stores;            // available component stores
+        size_t end = 0;
+        size_t total = 0;
 
-        const bitmask_index<N>& readonly_group_indices;          // group indices at query bitmask
-        const bitmask_index<N>& readonly_archetypes_indices;     // archetype indices at their bitmask
+        std::vector<task> tasks;
     };
 
-    // Main API.
-    template <typename... components>
-    class world
+    template <typename... Cs>
+    struct world_data
     {
-        static constexpr size_t N = sizeof...(components);
+        static constexpr size_t N = sizeof...(Cs);
 
-        template <typename C>
-        using store_index = index_of<C, std::tuple<components...>>;
-        template <typename... Cs>
-        using store_indices = indices_of_t<std::tuple<components...>, Cs...>;
+        entity_table           entities;
+        group_table<N>         groups;
+        archetype_table<N>     archetypes;
+        component_table<Cs...> components;
 
-        tasks m_tasks;                             // task queue
-        groups m_groups;                           // available query groups
-        entities m_entities;                       // available entities at their id
-        archetypes<N> m_archetypes;                // available archetypes 
-        stores<components...> m_stores;            // available component stores
+        std::unordered_map<bitmask<N>, size_t>     archetype_index_map;
+        std::unordered_map<bitmask<N * 2>, size_t> group_index_map;
+    };
 
-        bitmask_index<N> m_group_indices;          // group indices at query bitmask
-        bitmask_index<N> m_archetype_indices;     // archetype indices at their bitmask
+    // Main API. Exposes functionality for manipulating entities and components. 
+    template <typename... Cs>
+    struct world
+    {
+        static constexpr size_t N = sizeof...(Cs);
 
-        size_t create_group(bitmask<N>& _query_mask)
+        template <typename T>
+        using store_index = index_of<std::remove_const_t<T>, std::tuple<Cs...>>;        
+        template <typename... Ts>
+        using store_indices = indices_of<std::tuple<Cs...>, std::remove_const_t<Ts>...>::type;
+
+        world_data<Cs...> m_data;
+        world_queue       m_queue;
+
+        template <typename... Ts>
+        auto create_bitmask() -> bitmask<N> 
         {
-            group _group {};
+            bitmask<N> _mask;
 
-            for (size_t i = 1; i < m_archetypes.size(); i++)
+            (_mask.set(store_index<Ts>{}, true),...);
+
+            return _mask;
+        }
+
+        template <typename T>
+        auto get_pool(size_t& _archetype_index) -> pool<T>&
+        {
+            return std::get<store<T>>(m_data.components)[_archetype_index];
+        }
+
+        template <typename T>
+        auto get_store() -> store<T>&
+        {
+            return std::get<store<T>>(m_data.components);
+        }
+        
+        template <typename... Ts, typename... Incs, typename... Excs>
+        auto get_group(query_filter<include<Incs...>, exclude<Excs...>>) -> size_t
+        {   
+            bitmask<N> _include_filter = create_bitmask<Ts..., Incs...>();
+            bitmask<N> _exclude_filter = create_bitmask<Excs...>();
+ 
+            bitmask<N * 2> _group_mask;
+
+            for (size_t i = 0; i < N; i++)
             {
-                archetype<N>& _archetype = m_archetypes.at(i);
-
-                if ((_archetype.mask & _query_mask) == _query_mask)
+                if (_include_filter.test(i))
                 {
-                    _group.push_back(i);
+                    _group_mask.set(i, true);
+                }
+
+                if (_exclude_filter.test(i))
+                {
+                    _group_mask.set(i + N, true);
                 }
             }
 
-            m_group_indices[_query_mask] = m_groups.size();
-            m_groups.push_back(_group);
-
-            return m_groups.size() - 1;
-        }
-
-        template <typename C>
-        void create_pool(archetype<N>& _archetype)
-        {
-            size_t _store_index = store_index<C>{};
-
-            if (_archetype.mask.test(_store_index))
+            if (!m_data.group_index_map.contains(_group_mask))
             {
-                store<C>& _store = std::get<store<C>>(m_stores);
+                size_t _group_index = m_data.groups.size;
 
-                size_t _pool_index = _store.size();
+                m_data.groups.mask.emplace_back(_group_mask);
+                m_data.groups.archetype_indices.emplace_back(std::vector<size_t>{});
 
-                // stores index to pool at store / component index
-                _archetype.pools[_store_index] = _pool_index;
+                m_data.group_index_map[_group_mask] = _group_index;
 
-                // add new pool to store
-                _store.push_back({});
-            }
-        }
+                m_data.groups.size++;
 
-        size_t create_archetype(bitmask<N>& _archetype_mask)
-        {
-            size_t _archetype_index = m_archetypes.size();
-            std::array<size_t, N> _pool_indices;
-            std::vector<id> _entities;
-            m_archetypes.emplace_back(0, 0, _archetype_mask, _entities, _pool_indices);
-            m_archetype_indices[_archetype_mask] = _archetype_index;
+                for (size_t _archetype_index = 0; _archetype_index < m_data.archetypes.size; _archetype_index++)
+                {
+                    bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
 
-            archetype<N>& _archetype = m_archetypes.at(_archetype_index);
+                    if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
+                    {
+                        std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[_group_index];
+                        _archetype_indices.emplace_back(_archetype_index);
+                    }
+                }
 
-            (create_pool<components>(_archetype),...);
-
-            add_to_group(_archetype_mask, _archetype_index);
-
-            return _archetype_index;
-        }
-        
-        void add_id(id& _id, archetype<N>& _archetype)
-        {
-            size_t _archetype_index = m_archetype_indices.at(_archetype.mask);
-            size_t _component_index = _archetype.end; // will always be the last valid index + 1
-
-            if (_archetype.end < _archetype.total)
-            {
-                // index was reused
-                _archetype.entities.at(_component_index) = _id;
-                _archetype.end++;
+                return _group_index;
             }
             else 
             {
-                // new index was created
-                _archetype.entities.emplace_back(_id);
-                _archetype.end++;
-                _archetype.total++;
-            } 
+                return m_data.group_index_map[_group_mask];
+            }
+        }  
 
-            entity& _entity = m_entities.at(_id);   
-            _entity.archetype_index = _archetype_index;
-            _entity.component_index = _component_index;
-        }
-
-        void add_to_group(bitmask<N>& _archetype_mask, size_t& _archetype_index)
+        auto get_archetype(bitmask<N>& _archetype_mask) -> size_t
         {
-            for (auto& [_group_mask, _group_index] : m_group_indices)
+            if (!m_data.archetype_index_map.contains(_archetype_mask))
             {
-                if ((_group_mask & _archetype_mask) == _group_mask)
-                {   
-                    group& _group = m_groups.at(_group_index);
+                size_t _archetype_index = m_data.archetypes.size;
 
-                    _group.push_back(_archetype_index);
-                }
+                m_data.archetypes.end.emplace_back(0);
+                m_data.archetypes.total.emplace_back(0);
+                m_data.archetypes.mask.emplace_back(_archetype_mask);
+                m_data.archetypes.entity_ids.emplace_back(std::vector<id>{});
+
+                m_data.archetype_index_map[_archetype_mask] = _archetype_index;
+
+                m_data.archetypes.size++;
+
+                // create a pool for each component at the archetype index
+
+                (std::get<store<Cs>>(m_data.components).emplace_back(pool<Cs>()),...);
+
+                // add to group
+
+                add_to_group(_archetype_mask, _archetype_index);
+
+                return _archetype_index;
+            }
+            else 
+            {
+                return m_data.archetype_index_map[_archetype_mask];
             }
         }
 
-        template <typename C>
-        void add_to_pool(archetype<N>& _archetype, C& _component)
-        {            
-            pool<C>& _pool = get_pool<C>(_archetype);
+        template <typename T>
+        void change_pool(size_t& _component_index, size_t& _current_archetype_index, size_t& _new_archetype_index)
+        {
+            size_t _store_index = store_index<T>{};
 
-            if (_archetype.end < _archetype.total)
+            bitmask<N>& _current_archetype_mask = m_data.archetypes.mask[_current_archetype_index];
+            bitmask<N>& _new_archetype_mask = m_data.archetypes.mask[_new_archetype_index];
+
+            if (_current_archetype_mask.test(_store_index))
+            {
+                pool<T>& _pool = get_pool<T>(_current_archetype_index);
+
+                if (_new_archetype_mask.test(_store_index))
+                {
+                    T& _component = _pool[_component_index];
+
+                    add_to_pool(_new_archetype_index, _component);   
+                }
+        
+                std::swap(_pool[_component_index], _pool[m_data.archetypes.end[_current_archetype_index] - 1]);
+            }
+        }
+
+        template <typename... Ts>
+        auto change_archetype(id& _id, bool removing_components = false) -> size_t
+        {
+            size_t _current_archetype_index = m_data.entities.archetype_index[_id];
+            size_t _component_index = m_data.entities.component_index[_id];
+
+            bitmask<N> _current_mask = m_data.archetypes.mask[_current_archetype_index];
+
+            bitmask<N> _new_mask = removing_components 
+            ? _current_mask & ~create_bitmask<Ts...>() // erase non-matching
+            : _current_mask | create_bitmask<Ts...>(); // keep both sets of bits
+
+            size_t _new_archetype_index = get_archetype(_new_mask);
+
+            (change_pool<Cs>(
+                _component_index, 
+                _current_archetype_index, 
+                _new_archetype_index 
+            ),...);
+
+            remove_from_archetype(_id, _current_archetype_index);
+
+            add_to_archetype(_id, _new_archetype_index);
+
+            return _new_archetype_index;
+        }
+
+        template <typename T>
+        void add_to_pool(size_t& _archetype_index, T& _component) 
+        {
+            pool<T>& _pool = get_pool<T>(_archetype_index);
+
+            if (m_data.archetypes.end[_archetype_index] < m_data.archetypes.total[_archetype_index])
             {
                 // reuse a "dead" index in the pool
-                 _pool.at(_archetype.end) = _component;
+                 _pool.at(m_data.archetypes.end[_archetype_index]) = _component;
             }
             else 
             {
@@ -442,369 +448,273 @@ namespace ecs
             } 
         }
 
-        template <typename... Cs>
-        size_t get_group()
+        void add_to_group(bitmask<N>& _archetype_mask, size_t& _archetype_index) 
         {
-            bitmask<N> _query_mask = create_bitmask<Cs...>();
-
-            return m_group_indices.contains(_query_mask) 
-            ? m_group_indices.at(_query_mask)
-            : create_group(_query_mask);
-        }
-
-        template <typename C>
-        pool<C>& get_pool(archetype<N>& _archetype)
-        {
-            size_t _store_index = store_index<C>{};
-            size_t _pool_index = _archetype.pools[_store_index];
-
-            store<C>& _store = std::get<store<C>>(m_stores);
-            return _store.at(_pool_index);
-        }
-
-        archetype<N>& get_archetype(bitmask<N>& _archetype_mask)
-        {
-            size_t _archetype_index = m_archetype_indices.contains(_archetype_mask)
-            ? m_archetype_indices.at(_archetype_mask)
-            : create_archetype(_archetype_mask);
-
-            return m_archetypes[_archetype_index];
-        }
-
-        // Removes an id, swaps and updates the swapped entity.
-        void change_id(size_t& _component_index, archetype<N>& _archetype)
-        {
-            std::swap(_archetype.entities.at(_component_index), _archetype.entities.at(_archetype.end - 1));
-            id _swapped_id = _archetype.entities.at(_component_index);
-            entity& _swapped_entity = m_entities.at(_swapped_id);
-            _swapped_entity.component_index = _component_index;
-            _archetype.end--;
-        }
-
-        // Copies a component from one pool to the other where applicable.
-        template <typename C>
-        void change_pool(size_t _component_index, archetype<N>& _current_archetype, archetype<N>& _new_archetype)
-        {
-            size_t _store_index = store_index<C>{};
-
-            if (_current_archetype.mask.test(_store_index))
+            for (const auto& [_group_mask, _group_index] : m_data.group_index_map)
             {
-                pool<C>& _pool = get_pool<C>(_current_archetype);
+                bitmask<N> _include_filter;
+                bitmask<N> _exclude_filter;
 
-                // copy 
-                if (_new_archetype.mask.test(_store_index))
+                for (size_t i = 0; i < N; ++i)
                 {
-                    C& _component = _pool.at(_component_index);
-
-                    add_to_pool(_new_archetype, _component);   
+                    if (_group_mask.test(i)) _include_filter.set(i);
+    
+                    if (_group_mask.test(i + N)) _exclude_filter.set(i);
                 }
-        
-                // remove
-                std::swap(_pool.at(_component_index), _pool.at(_current_archetype.end - 1));
+
+                if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
+                {
+                    std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[_group_index];
+                    _archetype_indices.emplace_back(_archetype_index);
+                }
             }
         }
 
-        template <typename... Cs>
-        archetype<N>& change_archetype(id& _id, bool removing_components = false)
+        void add_to_archetype(id& _id, size_t& _archetype_index)
         {
-            entity& _entity = m_entities.at(_id);
+            size_t& _end = m_data.archetypes.end[_archetype_index];
+            size_t& _total = m_data.archetypes.total[_archetype_index];
+            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
 
-            bitmask<N> _current_mask = m_archetypes.at(_entity.archetype_index).mask;
+            size_t _component_index = _end; // will always be the last valid index + 1
 
-            bitmask<N> _new_mask = removing_components 
-            ? _current_mask & ~create_bitmask<Cs...>() // erase all
-            : _current_mask | create_bitmask<Cs...>(); // keep both sets of bits
+            if (_end < _total)
+            {
+                // index was reused
+                _entity_ids[_end] = _id;
+                _end++;
+            }
+            else 
+            {
+                // new index was created
+                _entity_ids.emplace_back(_id);
+                _end++;
+                _total++;
+            } 
 
-            archetype<N>& _new_archetype = get_archetype(_new_mask);
-            archetype<N>& _current_archetype = m_archetypes.at(_entity.archetype_index);
+            m_data.entities.archetype_index[_id] = _archetype_index;
+            m_data.entities.component_index[_id] = _component_index;
+        }
 
-            (change_pool<components>(_entity.component_index, _current_archetype, _new_archetype),...);
+        template <typename T>
+        void remove_from_pool(size_t& _component_index, size_t& _archetype_index) 
+        {
+            size_t _store_index = store_index<T>{};
 
-            // update old archetype
-            change_id(_entity.component_index, _current_archetype);
+            bitmask<N>& _current_archetype_mask = m_data.archetypes.mask[_archetype_index];
 
-            // update new archetype
-            add_id(_id, _new_archetype);
+            if (_current_archetype_mask.test(_store_index))
+            {
+                pool<T>& _pool = get_pool<T>(_archetype_index);
+        
+                std::swap(_pool[_component_index], _pool[m_data.archetypes.end[_archetype_index] - 1]);
+            }
+        }
+        
+        void remove_from_archetype(id& _id, size_t& _archetype_index) 
+        {
+            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
+            size_t& _component_index = m_data.entities.component_index[_id];
+            size_t& _end = m_data.archetypes.end[_archetype_index];
 
-            return _new_archetype;
+            std::swap(_entity_ids[_component_index], _entity_ids[ _end - 1]);
+            id _swapped_id = _entity_ids[_component_index];
+            m_data.entities.component_index[_swapped_id] = _component_index;
+            _end--;
         }
 
         public:
 
-            bool has_entity(id _id)
+            bool exists(id _id) 
             {
-                return _id < m_entities.size();
+                return _id < m_data.entities.size;
             }
 
-            template <typename... Cs>
-            bool has_group()
+            bool empty(id _id)
             {
-                bitmask<N> _query_mask = create_bitmask<Cs...>();
-
-                return m_group_indices.contains(_query_mask);
-            }
-
-            bool has_group(bitmask<N>&& _query_mask)
-            {
-                return m_group_indices.contains(_query_mask);
-            }
-
-            template <typename... Cs>
-            bool has_archetype()
-            {
-                bitmask<N> _archetype_mask = create_bitmask<Cs...>();
-
-                return m_archetype_indices.contains(_archetype_mask);
-            }
-
-            bool has_archetype(bitmask<N>&& _archetype_mask)
-            {
-                return m_archetype_indices.contains(_archetype_mask);
-            }
-
-            template <typename C>
-            bool has_component(id _id)
-            {
-                if (has_entity(_id))
+                if (exists(_id))
                 {
-                    entity& _entity = m_entities.at(_id);
-                    bitmask<N>& _archetype_mask = m_archetypes.at(_entity.archetype_index).mask;                    
-                    return _archetype_mask.test(store_index<C>{});
+                    return m_data.entities.archetype_index[_id] == 0;
                 }
 
                 return false;
             }
 
-            template <typename... Cs>
-            bool has_components(id _id)
-            {
-                if (has_entity(_id))
+            template <typename T, typename... Ts>
+            bool has(id _id) 
+            {   
+                if (exists(_id))
                 {
-                    entity& _entity = m_entities.at(_id);
-                    bitmask<N>& _archetype_mask = m_archetypes.at(_entity.archetype_index).mask;                    
-                    bitmask<N> _query_mask = create_bitmask<Cs...>();
+                    size_t& _archetype_index = m_data.entities.archetype_index[_id];
+                    bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
 
-                    return (_archetype_mask & _query_mask) == _query_mask;
-                }
-
-                return false;
-            }
-
-            // Creates a reader object giving readonly access to world data.
-            auto create_reader()
-            {
-                return reader<N, components...>{
-                    m_groups,
-                    m_entities,
-                    m_archetypes,
-                    m_stores,
-                    m_group_indices,
-                    m_archetype_indices
-                };
-            }  
-
-            // Creates a query object for iterating over components.
-            template <typename... Cs>
-            auto create_query()
-            {
-                return query_result<N, store_indices<Cs...>, Cs...>(
-                    get_group<Cs...>(),
-                    m_groups,
-                    m_entities,
-                    m_archetypes,
-                    std::tie(std::get<store<Cs>>(m_stores)...)
-                );
-            }
-
-            // Creates a bitmask of size N (component count) for the desired component types.
-            template <typename... Cs>
-            bitmask<N> create_bitmask()
-            {
-                bitmask<N> _mask;
-
-                if constexpr (sizeof...(Cs) > 0)
-                {
-                    auto set_bit = [&_mask]<typename C>(empty<C>)
+                    if constexpr (sizeof...(Ts) == 0)
+                    {               
+                        return _archetype_mask.test(store_index<T>());
+                    }
+                    else 
                     {
-                        _mask.set(store_index<C>{}, true);
-                    };
-
-                    (set_bit(empty<Cs>{}),...);
+                        bitmask<N> _mask = create_bitmask<T, Ts...>();
+                        return (_archetype_mask & _mask) == _mask;
+                    }
                 }
 
-                return _mask;
-            }
+                return false;
+            }   
 
-            // Allocates a new entity id. Creates and puts it at the 0 archetype or reuses an empty id if available.
-            id create_entity()
+            auto create() -> id 
             {
                 bitmask<N> _empty_mask;
-                archetype<N>& _empty_archetype = get_archetype(_empty_mask);
+
+                size_t _empty_index = get_archetype(_empty_mask);
+                
+                size_t& _end = m_data.archetypes.end[_empty_index];
 
                 id _id;
 
-                // create or reuse id
-                if (_empty_archetype.end > 0)
+                if (_end > 0)
                 {
-                    _id = _empty_archetype.entities.at(_empty_archetype.end);
+                    _id = m_data.archetypes.entity_ids[_empty_index][_end - 1];
                 }
                 else 
                 {
-                    _id = m_entities.size();
-                    m_entities.emplace_back(0, 0);
-                    add_id(_id, _empty_archetype);
+                    _id = m_data.entities.size;
+
+                    m_data.entities.component_index.emplace_back(_end);
+                    m_data.entities.archetype_index.emplace_back(_empty_index);
+                    
+                    add_to_archetype(_id, _empty_index);
+
+                    m_data.entities.size++;
                 }
 
                 return _id;
             }
 
-            // Moves entity into empty archetype.
-            void destroy_entity(id _id)
+            void destroy(id _id) 
             {
-                if (has_components(_id))  // ignores empty entities
+                if (!empty(_id))
                 {
-                    entity& _entity = m_entities.at(_id);
-                    archetype<N>& _current_archetype = m_archetypes.at(_entity.archetype_index);
-                    bitmask<N> empty_mask{}; // empty archetype
-                    archetype<N>& _empty_archetype = get_archetype(empty_mask);
+                    size_t _component_index = m_data.entities.component_index[_id];
+                    size_t _archetype_index = m_data.entities.archetype_index[_id];
 
-                    // copy nothing (because empty), but still perform the change
-                    change_id(_entity.component_index, _current_archetype);
-                    add_id(_id, _empty_archetype);
+                    // only non-empty
+                    (remove_from_pool<Cs>(_component_index, _archetype_index),...);
+
+                    remove_from_archetype(_component_index, _archetype_index);
+
+                    _archetype_index = 0;
+
+                    add_to_archetype(_id, _archetype_index);
                 }
             }
 
-            // Gets a readonly entity struct at the id. Unsafe getter.
-            const entity& get_entity(id _id)
+            template <typename T, typename... Ts>
+            void add(id _id, T&& _component, Ts&&... _components) 
             {
-                return m_entities.at(_id);
-            }
-
-            // Extracts a single component. Unsafe getter, perform check beforehand.
-            template <typename C>
-            C& get_component(id _id)
-            {
-                entity& _entity = m_entities.at(_id);
-                archetype<N>& _archetype = m_archetypes.at(_entity.archetype_index);
-                pool<C>& _pool = get_pool<C>(_archetype);
-
-                return _pool.at(_entity.component_index);
-            }
-
-            // Extracts several components. Unsafe getter, perform check beforehand.
-            template <typename C, typename... Cs>
-            auto get_components(id _id) -> std::tuple<C&, Cs&...>
-            {
-                return std::tie(get_component<C>(_id), get_component<Cs>(_id)...);
-            }
-
-            // Gets a readonly entity struct at the id. Safe getter.
-            const entity* try_get_entity(id _id)
-            {
-                if (has_entity(_id))
+                if (!has<T, Ts...>(_id))
                 {
-                    return &get_entity(_id);
-                }
-                else   
-                {
-                    return nullptr;
+                    size_t _new_archetype_index = change_archetype<T, Ts...>(_id);
+
+                    add_to_pool<T>(_new_archetype_index, _component);
+                    (add_to_pool<Ts>(_new_archetype_index, _components),...);
                 }
             }
 
-            // Extracts a single component. Safe getter, returns nullptr if the id is invalid.
-            template <typename C>
-            C* try_get_component(id _id)
+            template <typename T, typename... Ts>
+            void remove(id _id) 
             {
-                if (has_component<C>(_id))
+                if (has<T, Ts...>(_id))
                 {
-                    return &get_component<C>(_id);
-                }
-                else   
-                {
-                    return nullptr;
+                    change_archetype<T, Ts...>(_id, true);
                 }
             }
 
-            // Extracts several components. Safe getter, returns nullopt if the id is invalid.
-            template <typename C, typename... Cs>
-            auto try_get_components(id _id) -> std::optional<std::tuple<C&, Cs&...>>
+            template <typename T, typename... Ts>
+            auto get(id _id) -> std::tuple<T&, Ts&...>
             {
-                if (has_components<C, Cs...>(_id))
+                size_t _component_index = m_data.entities.component_index[_id];
+                size_t _archetype_index = m_data.entities.archetype_index[_id];
+
+                return std::tie<T, Ts...>(
+                    get_pool<T>(_archetype_index)[_component_index],  
+                    get_pool<Ts>(_archetype_index)[_component_index]...
+                );
+            }
+
+            template <typename T, typename... Ts>
+            auto try_get(id _id) -> std::optional<std::tuple<T&, Ts&...>>
+            {
+                if (has<T, Ts...>(_id))
                 {
-                    return get_components<C, Cs...>(_id);
+                    return get<T, Ts...>(_id);
                 }
-                else   
+
+                return std::nullopt;
+            }
+
+            template <typename... Ts, typename... Fs>
+            auto query(query_filter<Fs...> = query_filter<>{})
+            {
+                return query_result<N, Ts...>({
+                    get_group<Ts...>(typename query_filter<Fs...>::params{}),
+                    m_data.groups,
+                    m_data.archetypes,
+                    std::tie(get_store<Ts>()...)
+                });
+            }
+
+            template <typename... Ts, typename Callback, typename... Fs>
+            void iter(Callback&& _callback, query_filter<Fs...> _filter = query_filter<>{}) 
+            {
+                if (std::is_invocable_v<Callback, item<Ts...>>)
                 {
-                    return std::nullopt;
+                    size_t _group_index = get_group<Ts...>(_filter);
+
+                    std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[_group_index];
+
+                    for (size_t& _archetype_index : _archetype_indices)
+                    {
+                        std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
+
+                        for (size_t _component_index = 0; _component_index < m_data.archetypes.end[_archetype_index]; _component_index++)
+                        {
+                            const id& _id = _entity_ids[_component_index];
+
+                            _callback(std::tie(_id, get_pool<Ts>(_archetype_index)[_component_index])...);
+                        }
+                    }
                 }
             }
 
-            template <typename C>
-            void add_component(id _id, C&& _component)
+            void queue(task&& _task) 
             {
-                if (!has_component<C>(_id))
+                if (m_queue.end < m_queue.total)
                 {
-                    archetype<N>& _new_archetype = change_archetype<C>(_id);
-                    add_to_pool(_new_archetype, _component);
+                    m_queue.tasks[m_queue.end] = _task;
                 }
+                else 
+                {
+                    m_queue.tasks.emplace_back(_task);
+                    m_queue.total++;
+                }
+
+                m_queue.end++;
             }
 
-            template <typename C, typename... Cs>
-            void add_components(id _id, C&& _component, Cs&&... _components)
-            {
-                if (!has_components<C, Cs...>(_id))
-                {
-                    archetype<N>& _new_archetype = change_archetype<C, Cs...>(_id);
-
-                    add_to_pool(_new_archetype, _component);
-                    (add_to_pool(_new_archetype, _components),...);
-                }
-            }
-
-            template <typename C>
-            void remove_component(id _id)
-            {
-                if (has_component<C>(_id))
-                {
-                    change_archetype<C>(_id, true);
-                }
-            }  
-
-            template <typename C, typename... Cs>
-            void remove_components(id _id)
-            {
-                if (has_components<C, Cs...>(_id))
-                {
-                    change_archetype<C, Cs...>(_id, true);
-                }
-            }  
-
-            // Resets all data.
-            void clear()
-            {
-                m_groups = groups{};
-                m_entities = entities{};
-                m_archetypes = archetypes<N>{};
-                m_stores = stores<components...>{};
-                m_group_indices = bitmask_index<N>{};
-                m_archetype_indices = bitmask_index<N>{};
-            }
-
-            // Queues a task to be executed later.
-            void queue(task&& _task)
-            {
-                m_tasks.push_back(_task);
-            }
-
-            // Executes all queued tasks.
             void update() 
             {
-                for (auto& task : m_tasks)
+                for (task& _task : m_queue.tasks)
                 {
-                    task();
+                    _task();
                 }
+                
+                m_queue.end = 0;
+            }
 
-                m_tasks.clear();
+            auto read() const -> const world_data<Cs...>&
+            {
+                return m_data;
             }
     };
 };
