@@ -31,11 +31,8 @@ void benchmark_create()
     benchmark("Create 3 components:", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            auto id = test_world.create();
-
-            test_world.add(id, Health{}, Position{}, Detector{});
+            test_world.create(Health{}, Position{}, Detector{});
         }
-
     }, 1);
 }
 
@@ -167,6 +164,36 @@ void benchmark_get()
     });
 }
 
+void benchmark_queue()
+{
+    // 1 task per entity to match benchmarking setup
+    benchmark("Queue add 1 component:", [](){
+        for (size_t i = 0; i < entity_count; i++)
+        {
+            test_world.queue([i](){
+                test_world.add(i, Health{});        
+            });
+        }
+    }, 1);
+
+    benchmark("Update add 1 component:", [](){
+        test_world.update();
+    }, 1);
+
+    benchmark("Queue add 2 components:", [](){
+        for (size_t i = 0; i < entity_count; i++)
+        {
+            test_world.queue([i](){
+                test_world.add(i, Position{}, Detector{});        
+            });
+        }
+    }, 1);
+
+    benchmark("Update add 2 components:", [](){
+        test_world.update();
+    }, 1);
+}
+
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
@@ -187,9 +214,7 @@ int main(int argc, char* argv[])
     benchmark_remove();
     benchmark_add();
     benchmark_destroy();
-    benchmark_create();
-    benchmark_add();
-    benchmark_remove();
+    benchmark_queue();
 
     log_metadata();
 

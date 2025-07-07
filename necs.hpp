@@ -210,15 +210,11 @@ namespace ecs
             {
                 if (std::is_invocable_v<Callback, item<Cs...>>)
                 {
-                    std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[m_data.group_index];
-
-                    for (size_t& _archetype_index : _archetype_indices)
+                    for (size_t _archetype_index : m_data.groups.archetype_indices[m_data.group_index])
                     {
-                        std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
-
                         for (size_t _component_index = 0; _component_index < m_data.archetypes.end[_archetype_index]; _component_index++)
                         {
-                            const id& _id = _entity_ids[_component_index];
+                            const id& _id = m_data.archetypes.entity_ids[_archetype_index][_component_index];
 
                             _callback(std::tie(_id, get_pool<Cs>(_archetype_index)[_component_index]...));
                         }
@@ -244,8 +240,6 @@ namespace ecs
     struct world_queue 
     {
         size_t end = 0;
-        size_t total = 0;
-
         std::vector<task> tasks;
     };
 
@@ -562,7 +556,8 @@ namespace ecs
                 return false;
             }   
 
-            auto create() -> id 
+            template <typename... Ts>
+            auto create(Ts&&... _components) -> id 
             {
                 bitmask<N> _empty_mask;
 
@@ -574,7 +569,7 @@ namespace ecs
 
                 if (_end > 0)
                 {
-                    _id = m_data.archetypes.entity_ids[_empty_index][_end - 1];
+                    _id = m_data.archetypes.entity_ids[_empty_index][_end - 1]; // reuse empty index
                 }
                 else 
                 {
@@ -583,9 +578,15 @@ namespace ecs
                     m_data.entities.component_index.emplace_back(_end);
                     m_data.entities.archetype_index.emplace_back(_empty_index);
                     
-                    add_to_archetype(_id, _empty_index);
+                    add_to_archetype(_id, _empty_index); // create new and add to empty
 
                     m_data.entities.size++;
+                }
+
+                if constexpr (sizeof...(Ts) > 0)
+                {
+                    size_t _new_archetype_index = change_archetype<Ts...>(_id);
+                    (add_to_pool<Ts>(_new_archetype_index, _components),...);                
                 }
 
                 return _id;
@@ -671,17 +672,13 @@ namespace ecs
                 {
                     size_t _group_index = get_group<Ts...>(typename query_filter<Fs...>::params{});
 
-                    std::vector<size_t>& _archetype_indices = m_data.groups.archetype_indices[_group_index];
-
-                    for (size_t& _archetype_index : _archetype_indices)
+                    for (size_t _archetype_index : m_data.groups.archetype_indices[_group_index])
                     {
-                        std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
-
                         for (size_t _component_index = 0; _component_index < m_data.archetypes.end[_archetype_index]; _component_index++)
                         {
-                            const id& _id = _entity_ids[_component_index];
+                            const id& _id = m_data.archetypes.entity_ids[_archetype_index][_component_index];
 
-                            _callback(std::tie(_id, get_pool<Ts>(_archetype_index)[_component_index])...);
+                            _callback(std::tie(_id, get_pool<Ts>(_archetype_index)[_component_index]...));
                         }
                     }
                 }
@@ -689,14 +686,13 @@ namespace ecs
 
             void queue(task&& _task) 
             {
-                if (m_queue.end < m_queue.total)
+                if (m_queue.end < m_queue.tasks.size())
                 {
                     m_queue.tasks[m_queue.end] = _task;
                 }
                 else 
                 {
                     m_queue.tasks.emplace_back(_task);
-                    m_queue.total++;
                 }
 
                 m_queue.end++;
@@ -704,11 +700,12 @@ namespace ecs
 
             void update() 
             {
-                for (task& _task : m_queue.tasks)
+
+                for (size_t i = 0; i < m_queue.end; i++)
                 {
-                    _task();
+                    m_queue.tasks[i]();
                 }
-                
+
                 m_queue.end = 0;
             }
 
@@ -717,7 +714,6 @@ namespace ecs
                 return m_data;
             }
     };
-
 
     // ----------------------------------------------------------------------------
     // Memory usage
