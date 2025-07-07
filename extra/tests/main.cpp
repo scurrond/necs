@@ -193,14 +193,16 @@ int main()
 {
     std::cout << "=== Running tests ===\n";
     
+    explode_archetypes();
+
     test_create();
     test_add();
-    test_query();
+    //test_query();
     test_remove();
-    // test_destroy();
+    test_destroy();
 
-    // test_queue();
-    // test_update();
+    test_queue();
+    test_update();
 
     const auto& data = test_world.read();
 
@@ -222,14 +224,25 @@ int main()
         std::cout << "\n - Entities: ";
         for (size_t j = 0; j < data.archetypes.end.at(i); j++)
         {
-            std::cout << "\n ---- id " << j << ": " << data.archetypes.entity_ids.at(i).at(j);
+            EntityId id = data.archetypes.entity_ids.at(i).at(j);
+
+            std::cout << "\n ---- Entity " << j << ":";
+            std::cout << " id: " << id;
+            std::cout << " component index: " << data.entities.component_index.at(id);
+        }
+
+        std::cout << "\n - Membership in " << data.archetypes.membership.at(i).size() << " groups: ";
+        for (size_t membership : data.archetypes.membership.at(i))
+        {
+            std::cout << membership << " ";
         }
 
         std::cout << "\n------------------------------------------------\n";
     }
 
+    log_metadata();
 
-    std::cout << "=== Run succeeded ===\n";
+    std::cout << "\n=== Run succeeded ===\n";
 
     return 0;
 }
