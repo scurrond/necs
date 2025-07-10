@@ -214,7 +214,7 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
-    test_world.config().max_empty_archetypes = 10;
+    test_world.config().max_empty_archetypes = 1000;
 
     explode_archetypes();
 

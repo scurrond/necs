@@ -256,8 +256,6 @@ namespace ecs
 
     struct world_config
     {
-        bool persistent_pools = false;             // pools will not have their data cleared on archetype reuse
-
         size_t max_empty_archetypes = 100;         // will start reusing archetypes after this threshold is reached
 
         // ...fill as needed
@@ -409,10 +407,18 @@ namespace ecs
 
             // update the data at the archetype index
 
-            if (m_data.archetypes.memberships[_archetype_index].size > 0)
+            if (!m_data.archetypes.entity_ids[_archetype_index].empty()) 
+            {
+                m_data.archetypes.entity_ids[_archetype_index].clear();
+
+                (clear_pool<Cs>(_archetype_index),...);
+            }
+
+            if (!m_data.archetypes.memberships[_archetype_index].size == 0)
             {
                 clear_memberships(_archetype_index);
             }
+
 
             m_data.archetypes.mask[_archetype_index] = _archetype_mask;
 
@@ -448,19 +454,14 @@ namespace ecs
         void deactivate_archetype(size_t& _archetype_index)
         {
             assert(_archetype_index != 0);          // 0 index archetype permitted to be empty
-            assert(m_data.archetypes.end[_archetype_index] == 0);    
+            assert(m_data.archetypes.end[_archetype_index] == 0);
+            
+            m_data.archetypes.end[_archetype_index] = 0;
+            m_data.archetypes.total[_archetype_index] = 0;
 
             // remove from groups if too many free archetypes
             if (m_data.free_archetypes_map.size() > m_config.max_empty_archetypes)
             {
-                if (!m_config.persistent_pools)
-                {
-                    m_data.archetypes.end[_archetype_index] = 0;
-                    m_data.archetypes.total[_archetype_index] = 0;
-                    m_data.archetypes.entity_ids[_archetype_index].clear();
-                    (clear_pool<Cs>(_archetype_index),...);
-                }
-
                 clear_memberships(_archetype_index);
             }
 
@@ -530,25 +531,6 @@ namespace ecs
             return _new_archetype_index;
         }
 
-        auto get_archetype(bitmask<N>& _archetype_mask) -> size_t
-        {
-            if (!m_data.archetype_index_map.contains(_archetype_mask))
-            {
-                return create_archetype(_archetype_mask);
-            }
-            else 
-            {
-                if (m_data.free_archetypes_map.contains(_archetype_mask)) // reactivate empty archetype
-                {                    
-                    return reactivate_archetype(_archetype_mask);
-                }
-                else 
-                {
-                    return m_data.archetype_index_map[_archetype_mask];
-                }
-            }
-        }
-
         template <typename T>
         auto get_pool(size_t& _archetype_index) -> pool<T>&
         {
@@ -586,6 +568,25 @@ namespace ecs
             }
         }  
 
+        auto get_archetype(bitmask<N>& _archetype_mask) -> size_t
+        {
+            if (!m_data.archetype_index_map.contains(_archetype_mask))
+            {
+                return create_archetype(_archetype_mask);
+            }
+            else 
+            {
+                if (m_data.free_archetypes_map.contains(_archetype_mask)) // reactivate empty archetype
+                {                    
+                    return reactivate_archetype(_archetype_mask);
+                }
+                else 
+                {
+                    return m_data.archetype_index_map[_archetype_mask];
+                }
+            }
+        }
+
         template <typename T>
         void add_to_pool(size_t& _archetype_index, T& _component) 
         {
@@ -593,8 +594,6 @@ namespace ecs
             size_t& _total = m_data.archetypes.total[_archetype_index];
 
             pool<T>& _pool = get_pool<T>(_archetype_index);
-
-            if (_pool.size() != _total) _pool.resize(_total); // resize pool after resizes to match archetype size
 
             if (_end < _total)
             {
