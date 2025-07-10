@@ -122,14 +122,21 @@ void benchmark_add()
     benchmark("1-component add: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.add(i, Health{});
+            test_world.add(i, Sprite{});
         }
     }, 1);
 
     benchmark("2-component add: ", [](){
         for (size_t i = 0; i < entity_count; i++)
         {
-            test_world.add(i, Position{}, Detector{});
+            test_world.add(i, Shape{}, Texture{});
+        }
+    }, 1);
+
+    benchmark("3-component add: ", [](){
+        for (size_t i = 0; i < entity_count; i++)
+        {
+            test_world.add(i, Scale{}, Rotation{}, Velocity{});
         }
     }, 1);
 }
@@ -168,12 +175,13 @@ void benchmark_queue()
 {
     // 1 task per entity to match benchmarking setup
     benchmark("Queue add 1 component:", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.queue([i](){
+        test_world.queue([](){
+            for (size_t i = 0; i < entity_count; i++)
+            {
                 test_world.add(i, Health{});        
-            });
-        }
+            }
+        });
+
     }, 1);
 
     benchmark("Update add 1 component:", [](){
@@ -181,12 +189,13 @@ void benchmark_queue()
     }, 1);
 
     benchmark("Queue add 2 components:", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.queue([i](){
+
+        test_world.queue([](){
+            for (size_t i = 0; i < entity_count; i++)
+            {
                 test_world.add(i, Position{}, Detector{});        
-            });
-        }
+            }
+        });
     }, 1);
 
     benchmark("Update add 2 components:", [](){
@@ -205,22 +214,22 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
+    test_world.config().max_empty_archetypes = 10;
+
     explode_archetypes();
 
     benchmark_create();
+    benchmark_get();
+    benchmark_add();
     benchmark_query();
     benchmark_iter();
-    benchmark_get();
     benchmark_remove();
-    benchmark_add();
     benchmark_destroy();
     benchmark_queue();
 
-    log_metadata();
+    print_metadata();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
-
-
 
     return 0;
 }

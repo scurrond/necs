@@ -75,7 +75,7 @@ inline void explode_archetypes()
     std::cout << "\nArchetype count: " << test_world.read().archetypes.size << "\n";
 }
 
-inline void log_metadata()
+inline void print_metadata()
 {
     []<typename... Cs>(const ecs::world_data<Cs...>& data)
     {
@@ -97,4 +97,44 @@ inline void log_metadata()
         << "\n------------------------------------------------";
     }
     (test_world.read());
+}
+
+inline void print_archetypes()
+{
+    const auto& data = test_world.read();
+
+    for (size_t i = 0; i < data.archetypes.size; i++)
+    {
+        std::cout << "------------------------------------------------\n";
+
+        std::cout << "Archetype: ";
+        std::cout << "\n - Index: " << i;
+        std::cout << "\n - End: " << data.archetypes.end.at(i);
+        std::cout << "\n - Total: " << data.archetypes.total.at(i);
+
+        std::cout << "\n - Bitmask: ";
+        for (size_t j = 0; j < data.archetypes.mask.at(i).size(); j++)
+        {
+            std::cout << data.archetypes.mask.at(i).test(j);
+        }
+
+        std::cout << "\n - Entities: ";
+        for (size_t j = 0; j < data.archetypes.end.at(i); j++)
+        {
+            EntityId id = data.archetypes.entity_ids.at(i).at(j);
+
+            std::cout << "\n ---- Entity " << j << ":";
+            std::cout << " id: " << id;
+            std::cout << " component index: " << data.entities.component_index.at(id);
+        }
+
+        std::cout << "\n - Membership in " << data.archetypes.memberships.at(i).size << " groups: ";
+        for (size_t j = 0; j < data.archetypes.memberships.at(i).size; j++)
+        {
+            std::cout << "\n ---- Group: " << data.archetypes.memberships.at(i).group_index.at(j) 
+            << " member index: " <<  data.archetypes.memberships.at(i).member_index.at(j);
+        }
+
+        std::cout << "\n------------------------------------------------\n";
+    }
 }

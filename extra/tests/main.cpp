@@ -204,43 +204,9 @@ int main()
     test_queue();
     test_update();
 
-    const auto& data = test_world.read();
 
-    for (size_t i = 0; i < data.archetypes.size; i++)
-    {
-        std::cout << "------------------------------------------------\n";
-
-        std::cout << "Archetype: ";
-        std::cout << "\n - Index: " << i;
-        std::cout << "\n - End: " << data.archetypes.end.at(i);
-        std::cout << "\n - Total: " << data.archetypes.total.at(i);
-
-        std::cout << "\n - Bitmask: ";
-        for (size_t j = 0; j < data.archetypes.mask.at(i).size(); j++)
-        {
-            std::cout << data.archetypes.mask.at(i).test(j);
-        }
-
-        std::cout << "\n - Entities: ";
-        for (size_t j = 0; j < data.archetypes.end.at(i); j++)
-        {
-            EntityId id = data.archetypes.entity_ids.at(i).at(j);
-
-            std::cout << "\n ---- Entity " << j << ":";
-            std::cout << " id: " << id;
-            std::cout << " component index: " << data.entities.component_index.at(id);
-        }
-
-        std::cout << "\n - Membership in " << data.archetypes.membership.at(i).size() << " groups: ";
-        for (size_t membership : data.archetypes.membership.at(i))
-        {
-            std::cout << membership << " ";
-        }
-
-        std::cout << "\n------------------------------------------------\n";
-    }
-
-    log_metadata();
+    print_archetypes();
+    print_metadata();
 
     std::cout << "\n=== Run succeeded ===\n";
 
