@@ -111,6 +111,7 @@ inline void print_archetypes()
         std::cout << "\n - Index: " << i;
         std::cout << "\n - End: " << data.archetypes.end.at(i);
         std::cout << "\n - Total: " << data.archetypes.total.at(i);
+        std::cout << "\n - Version: " << data.archetypes.version.at(i);
 
         std::cout << "\n - Bitmask: ";
         for (size_t j = 0; j < data.archetypes.mask.at(i).size(); j++)

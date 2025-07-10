@@ -91,6 +91,7 @@ namespace ecs
      
         std::vector<size_t>           end;          // the last viable (non-dead) index across each pool 
         std::vector<size_t>           total;        // the last initialized index across each pool
+        std::vector<size_t>           version;      // the number of times this archetype index has been reused
         std::vector<bitmask<N>>       mask;         // the bitmask of the archetype
         std::vector<std::vector<id>>  entity_ids;   // entities in this archetype at their component index
         std::vector<membership_table> memberships;  // indices into the member table 
@@ -372,6 +373,7 @@ namespace ecs
 
                 m_data.archetypes.end.emplace_back(0);
                 m_data.archetypes.total.emplace_back(0);
+                m_data.archetypes.version.emplace_back(0);
                 m_data.archetypes.mask.emplace_back(_archetype_mask);
                 m_data.archetypes.entity_ids.emplace_back(std::vector<id>{});
                 m_data.archetypes.memberships.emplace_back(membership_table{});
@@ -419,13 +421,14 @@ namespace ecs
                 clear_memberships(_archetype_index);
             }
 
-
             m_data.archetypes.mask[_archetype_index] = _archetype_mask;
 
             // kill the old archetype
             m_data.archetype_index_map[_archetype_mask] = _archetype_index;
             m_data.archetype_index_map.erase(_free_mask);
             m_data.free_archetypes_map.erase(_free_mask);
+
+            m_data.archetypes.version[_archetype_index]++;
 
             return _archetype_index;
         }
@@ -925,6 +928,7 @@ namespace ecs
 
         _total += _archetypes.end.capacity()         * sizeof(size_t);
         _total += _archetypes.total.capacity()       * sizeof(size_t);
+        _total += _archetypes.version.capacity()     * sizeof(size_t);
         _total += _archetypes.mask.capacity()        * sizeof(bitmask<N>);
         _total += _archetypes.entity_ids.capacity()  * sizeof(std::vector<id>);
         _total += _archetypes.memberships.capacity() * sizeof(membership_table);

@@ -214,7 +214,7 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
-    test_world.config().max_empty_archetypes = 1000;
+    test_world.config().max_empty_archetypes = 1;
 
     explode_archetypes();
 
@@ -227,6 +227,7 @@ int main(int argc, char* argv[])
     benchmark_destroy();
     benchmark_queue();
 
+    print_archetypes();
     print_metadata();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
