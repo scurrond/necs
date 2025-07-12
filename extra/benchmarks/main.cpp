@@ -180,32 +180,23 @@ void benchmark_get()
 
 void benchmark_queue()
 {
-    // 1 task per entity to match benchmarking setup
-    benchmark("Queue add 1 component:", [](){
+    benchmark("Queue create 1 component:", [](){
         test_world.queue([](){
-            for (size_t i = 0; i < entity_count; i++)
-            {
-                const EntityId id = {i, 0};
-
-                test_world.add(id, Health{});        
-            }
+            test_world.create(Health{});        
         });
-    }, 1);
+    }, entity_count, 1);
 
-    benchmark("Update add 1 component:", [](){
+    benchmark("Update create 1 component:", [](){
         test_world.update();
     }, 1);
 
-    benchmark("Queue add 2 components:", [](){
-
-        test_world.queue([](){
-            for (size_t i = 0; i < entity_count; i++)
-            {
-                const EntityId id = {i, 0};
-                test_world.add(id, Position{}, Detector{});        
-            }
+    size_t counter = 0;
+    benchmark("Queue add 2 components:", [&counter](){
+        test_world.queue([&counter](){
+            const EntityId id = {counter, test_world.version(counter)};
+            test_world.add(id, Position{}, Detector{});          
         });
-    }, 1);
+    }, entity_count, 1);
 
     benchmark("Update add 2 components:", [](){
         test_world.update();
@@ -232,10 +223,9 @@ int main(int argc, char* argv[])
     benchmark_iter();
     benchmark_remove();
     benchmark_destroy();
-    //benchmark_queue();
+    benchmark_queue();
 
     print_metadata();
-    print_archetypes();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

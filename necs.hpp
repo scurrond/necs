@@ -5,7 +5,6 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <iostream>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -62,6 +61,16 @@ namespace ecs
 
     template <typename Tuple, typename... Ts>
     struct indices_of { using type = std::index_sequence<index_of<Ts, Tuple>::value...>; };
+
+    // ----------------------------------------------------------------------------
+    // Listener
+    // ----------------------------------------------------------------------------
+
+    template <typename... Args>
+    struct listener 
+    {
+        std::function<void(Args...)> callback = [](Args...){};
+    };
 
     // ----------------------------------------------------------------------------
     // Tables
@@ -757,7 +766,7 @@ namespace ecs
                 return false;
             }   
             
-            auto version(size_t _entity_index)
+            auto version(size_t _entity_index) -> size_t
             {
                 return m_data.entities.version[_entity_index];
             }
@@ -859,6 +868,11 @@ namespace ecs
                 }
 
                 m_queue.end++;
+            }
+
+            void reset()
+            {
+                m_data = world_data<Cs...>{};
             }
 
             void update() 
