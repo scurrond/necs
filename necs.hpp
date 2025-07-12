@@ -63,20 +63,9 @@ namespace ecs
     struct indices_of { using type = std::index_sequence<index_of<Ts, Tuple>::value...>; };
 
     // ----------------------------------------------------------------------------
-    // Listener
-    // ----------------------------------------------------------------------------
-
-    template <typename... Args>
-    struct listener 
-    {
-        std::function<void(Args...)> callback = [](Args...){};
-    };
-
-    // ----------------------------------------------------------------------------
     // Tables
     // ----------------------------------------------------------------------------
 
-    // TODO: this needs a proper table layout 
     template <typename... Cs>
     using component_table = std::tuple<store<Cs>...>;
 
