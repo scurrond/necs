@@ -76,6 +76,7 @@ namespace ecs
     // Tables
     // ----------------------------------------------------------------------------
 
+    // TODO: this needs a proper table layout 
     template <typename... Cs>
     using component_table = std::tuple<store<Cs>...>;
 
@@ -288,7 +289,7 @@ namespace ecs
     struct world_queue 
     {
         size_t end = 0;
-        std::vector<task> tasks;
+        std::vector<task> tasks;     
     };
 
     template <typename... Cs>
@@ -304,7 +305,7 @@ namespace ecs
 
     // Main API. Exposes functionality for manipulating entities and components. 
     template <typename... Cs>
-    struct world
+    class world
     {
         static constexpr size_t N = sizeof...(Cs);
 
@@ -870,20 +871,20 @@ namespace ecs
                 m_queue.end++;
             }
 
-            void reset()
-            {
-                m_data = world_data<Cs...>{};
-            }
-
             void update() 
             {
-
                 for (size_t i = 0; i < m_queue.end; i++)
                 {
                     m_queue.tasks[i]();
                 }
 
                 m_queue.end = 0;
+            }
+
+            void reset()
+            {
+                m_data = world_data<Cs...>{};
+                m_queue = world_queue{};
             }
 
             auto read() const -> const world_data<Cs...>&
