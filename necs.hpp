@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstddef>
 #include <functional>
+#include <iostream>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -15,10 +16,18 @@
 namespace ecs
 {
     // ----------------------------------------------------------------------------
-    // Basic definitions
+    // Unique identifiers
     // ----------------------------------------------------------------------------
 
-    using id = size_t;
+    struct id 
+    {
+        size_t index;       // permanent index in a table
+        size_t version;     // reuse counter
+    };
+
+    // ----------------------------------------------------------------------------
+    // Basic definitions
+    // ----------------------------------------------------------------------------
 
     using task = std::function<void()>;
 
@@ -66,6 +75,10 @@ namespace ecs
         
         std::vector<size_t> component_index;        // stores the location of the entity's components
         std::vector<size_t> archetype_index;        // stores the location of the entity's archetype
+        std::vector<size_t> version;                // stores the number of reuses of this entity's index
+        std::vector<bool>   alive;                  // stores the entity's status
+
+        std::vector<size_t> free;                   // reusable dead entity indices
     };  
 
     struct member_table
@@ -92,11 +105,12 @@ namespace ecs
         std::vector<size_t>                    end;          // the last viable (non-dead) index across each pool 
         std::vector<size_t>                    total;        // the last initialized index across each pool
         std::vector<size_t>                    version;      // the number of times this archetype index has been reused
+        std::vector<bool>                      alive;        // the status of the archetype
         std::vector<bitmask<N>>                mask;         // the bitmask of the archetype
         std::vector<std::vector<id>>           entity_ids;   // entities in this archetype at their component index
         std::vector<membership_table>          memberships;  // indices into the member table 
 
-        std::unordered_map<bitmask<N>, size_t> free;         // indices of empty archetypes
+        std::vector<size_t>                    free;         // reusable archetype indices
         std::unordered_map<bitmask<N>, size_t> index;        // indices of all the archetypes in the system
     };
 
@@ -260,13 +274,6 @@ namespace ecs
     // World 
     // ----------------------------------------------------------------------------
 
-    struct world_config
-    {
-        size_t max_empty_archetypes = 100;         // will start reusing archetypes after this threshold is reached
-
-        // ...fill as needed
-    };
-
     struct world_queue 
     {
         size_t end = 0;
@@ -297,7 +304,10 @@ namespace ecs
 
         world_data<Cs...> m_data;
         world_queue       m_queue;
-        world_config      m_config;
+
+        // ----------------------------------------------------------------------------
+        // Utility 
+        // ----------------------------------------------------------------------------
 
         template <typename... Ts>
         auto create_bitmask() -> bitmask<N> 
@@ -308,6 +318,97 @@ namespace ecs
 
             return _mask;
         }
+
+        bool match_bitmask(bitmask<N>& _mask, bitmask<N>& _include_filter, bitmask<N>& _exclude_filter)
+        {
+            return (_include_filter & _mask) == _include_filter && (_exclude_filter & _mask).none();
+        }
+
+        // ----------------------------------------------------------------------------
+        // Id management 
+        // ----------------------------------------------------------------------------
+
+        auto get_id( ) -> id
+        {
+            return m_data.entities.free.empty() ? create_id() : reuse_id();
+        }
+
+        auto create_id() -> id
+        {
+            size_t _index = m_data.entities.size;
+
+            m_data.entities.component_index.emplace_back(0);
+            m_data.entities.archetype_index.emplace_back(0);
+            m_data.entities.version.emplace_back(0);
+            m_data.entities.alive.emplace_back(true);
+
+            m_data.entities.size++;
+
+            return { _index, 0 };
+        }
+
+        auto reuse_id() -> id
+        {
+            size_t _index = m_data.entities.free.back();
+
+            m_data.entities.version[_index]++;
+            m_data.entities.alive[_index] = true;
+
+            m_data.entities.free.pop_back();
+
+            return { _index, m_data.entities.version[_index] };
+        }
+
+        void destroy_id(id& _id)
+        {
+            m_data.entities.alive[_id.index] = false;
+            m_data.entities.free.emplace_back(_id.index);
+        }
+
+        void add_id(id& _id, size_t& _archetype_index)
+        {
+            size_t& _end = m_data.archetypes.end[_archetype_index];
+            size_t& _total = m_data.archetypes.total[_archetype_index];
+
+            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
+
+            size_t _component_index = _end; // will always be the last valid index + 1
+
+            if (_end < _total)
+            {
+                // index was reused
+                _entity_ids[_end] = _id;
+                _end++;
+            }
+            else 
+            {
+                // new index was created
+                _entity_ids.emplace_back(_id);
+                _end++;
+                _total++;
+            } 
+
+            m_data.entities.archetype_index[_id.index] = _archetype_index;
+            m_data.entities.component_index[_id.index] = _component_index;
+        }
+
+        void remove_id(id& _id, size_t& _archetype_index) 
+        {
+            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
+            size_t& _component_index = m_data.entities.component_index[_id.index];
+            size_t& _end = m_data.archetypes.end[_archetype_index];
+
+            std::swap(_entity_ids[_component_index], _entity_ids[_end - 1]);
+            id _swapped_id = _entity_ids[_component_index];
+            m_data.entities.component_index[_swapped_id.index] = _component_index;
+            _end--;
+
+            if (_end == 0) destroy_archetype(_archetype_index);
+        }
+
+        // ----------------------------------------------------------------------------
+        // Member management
+        // ----------------------------------------------------------------------------
 
         auto create_member(size_t& _archetype_index, size_t& _group_index)
         {
@@ -326,218 +427,72 @@ namespace ecs
             _membership.size++;
         }
 
-        auto create_group(bitmask<N*2>& _group_mask, bitmask<N>& _include_filter, bitmask<N>& _exclude_filter) -> size_t 
+        void destroy_member(size_t& _archetype_index, size_t& _group_index, size_t& _member_index)
         {
-            size_t _group_index = m_data.groups.size;
+            assert(m_data.groups.members[_group_index].archetype_index[_member_index] == _archetype_index);
 
-            m_data.groups.mask.emplace_back(_group_mask);
-            m_data.groups.members.emplace_back(member_table{});
+            size_t _index_to_swap = m_data.groups.members[_group_index].size - 1;
 
-            m_data.groups.index[_group_mask] = _group_index;
+            std::swap(m_data.groups.members[_group_index].archetype_index[_member_index], m_data.groups.members[_group_index].archetype_index[_index_to_swap]);
+            std::swap(m_data.groups.members[_group_index].membership_index[_member_index], m_data.groups.members[_group_index].membership_index[_index_to_swap]);
 
-            m_data.groups.size++;
+            m_data.groups.members[_group_index].archetype_index.pop_back();
+            m_data.groups.members[_group_index].membership_index.pop_back();
+            m_data.groups.members[_group_index].size--;
 
-            for (size_t _archetype_index = 0; _archetype_index < m_data.archetypes.size; _archetype_index++)
+            // update archetype member
+
+            size_t _swapped_archetype_index = m_data.groups.members[_group_index].archetype_index[_member_index];
+            size_t _swapped_membership_index = m_data.groups.members[_group_index].membership_index[_member_index];
+
+            m_data.archetypes.memberships[_swapped_archetype_index].member_index[_swapped_membership_index] = _member_index;
+        }   
+
+        // ----------------------------------------------------------------------------
+        // Membership management
+        // ----------------------------------------------------------------------------
+
+        auto create_memberships(size_t _archetype_index)
+        {
+            for (size_t _group_index = 0; _group_index < m_data.groups.size; _group_index++)
             {
                 bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
+                bitmask<N * 2>& _group_mask = m_data.groups.mask[_group_index];
 
-                if (m_data.archetypes.free.contains(_archetype_mask)) continue; // skip empty archetypes
+                bitmask<N> _include_filter;
+                bitmask<N> _exclude_filter;
+
+                for (size_t i = 0; i < N; ++i)
+                {
+                    _include_filter[i] = _group_mask[i];
+                    _exclude_filter[i] = _group_mask[i + N];
+                }
 
                 if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
                 {
                     create_member(_archetype_index, _group_index);
                 }
             }
-
-            return _group_index;
         }
 
-        auto create_memberships(size_t _archetype_index)
-        {
-            for (size_t _group_index = 0; _group_index < m_data.groups.size; _group_index++)
-            {
-                add_to_group(_archetype_index, _group_index);
-            }
-        }
-
-        auto create_archetype(bitmask<N>& _archetype_mask) -> size_t
-        {
-            size_t _archetype_index;
-
-            if (m_data.archetypes.free.size() > m_config.max_empty_archetypes && !m_data.archetypes.free.empty())
-            {
-                _archetype_index = reuse_archetype(_archetype_mask);
-            }
-            else 
-            {
-                _archetype_index = m_data.archetypes.size;
-
-                m_data.archetypes.end.emplace_back(0);
-                m_data.archetypes.total.emplace_back(0);
-                m_data.archetypes.version.emplace_back(0);
-                m_data.archetypes.mask.emplace_back(_archetype_mask);
-                m_data.archetypes.entity_ids.emplace_back(std::vector<id>{});
-                m_data.archetypes.memberships.emplace_back(membership_table{});
-
-                m_data.archetypes.size++;
-
-                // create a pool for each component at the archetype index
-
-                (std::get<store<Cs>>(m_data.components).emplace_back(pool<Cs>()),...);
-            }
-
-            create_memberships(_archetype_index);
-
-            m_data.archetypes.index[_archetype_mask] = _archetype_index;
-
-            return _archetype_index;
-        }
-
-        auto reuse_archetype(bitmask<N>& _archetype_mask) -> size_t
-        {
-            auto _it = m_data.archetypes.free.begin();
-
-            assert(_it != m_data.archetypes.free.end());
-
-            std::pair<bitmask<N>, size_t> _first = *_it;
-
-            auto [ _free_mask, _free_index ] = _first;
-
-            size_t _archetype_index = _free_index;
-
-            assert(_archetype_mask != _free_mask);
-            assert(m_data.archetypes.end[_archetype_index] == 0);
-
-            // update the data at the archetype index
-
-            if (!m_data.archetypes.entity_ids[_archetype_index].empty()) 
-            {
-                m_data.archetypes.total[_archetype_index] = 0;
-                m_data.archetypes.entity_ids[_archetype_index].clear();
-                (clear_pool<Cs>(_archetype_index),...);
-            }
-
-            if (!m_data.archetypes.memberships[_archetype_index].size == 0)
-            {
-                clear_memberships(_archetype_index);
-            }
-
-            m_data.archetypes.mask[_archetype_index] = _archetype_mask;
-
-            // kill the old archetype
-            m_data.archetypes.index[_archetype_mask] = _archetype_index;
-            m_data.archetypes.index.erase(_free_mask);
-            m_data.archetypes.free.erase(_free_mask);
-
-            m_data.archetypes.version[_archetype_index]++;
-
-            return _archetype_index;
-        }
-
-        auto reactivate_archetype(bitmask<N>& _archetype_mask) -> size_t
-        {
-            size_t _archetype_index = m_data.archetypes.free[_archetype_mask];
-
-            m_data.archetypes.free.erase(_archetype_mask);
-
-            // members have been removed or never existed, try to reconstruct
-            if (m_data.archetypes.memberships[_archetype_index].size == 0)
-            {
-                assert(m_data.archetypes.memberships[_archetype_index].group_index.size() == 0);
-                assert(m_data.archetypes.memberships[_archetype_index].member_index.size() == 0);
-
-                for (size_t _group_index = 0; _group_index < m_data.groups.size; _group_index++)
-                {
-                    add_to_group(_archetype_index, _group_index);
-                }
-            }
-
-            return _archetype_index;
-        }
-
-        void deactivate_archetype(size_t& _archetype_index)
-        {
-            assert(_archetype_index != 0);          // 0 index archetype permitted to be empty
-            assert(m_data.archetypes.end[_archetype_index] == 0);
-            
-            // remove from groups if too many free archetypes
-            if (m_data.archetypes.free.size() > m_config.max_empty_archetypes)
-            {
-                clear_memberships(_archetype_index);
-            }
-
-            m_data.archetypes.free[m_data.archetypes.mask[_archetype_index]] = _archetype_index;
-        }
-
-        template <typename C>
-        void clear_pool(size_t& _archetype_index)
-        {
-            pool<C>& _pool = get_pool<C>(_archetype_index);
-
-            if (!_pool.empty()) _pool.clear();
-        }
-
-        void clear_memberships(size_t& _archetype_index)
+        void destroy_memberships(size_t& _archetype_index)
         {
             for (size_t _membership_index = 0; _membership_index < m_data.archetypes.memberships[_archetype_index].size; _membership_index++)
             {
                 size_t _group_index = m_data.archetypes.memberships[_archetype_index].group_index[_membership_index];
                 size_t _member_index = m_data.archetypes.memberships[_archetype_index].member_index[_membership_index];
 
-                remove_from_group(_archetype_index, _group_index, _member_index);
+                destroy_member(_archetype_index, _group_index, _member_index);
             }
 
             // reset memberships
             m_data.archetypes.memberships[_archetype_index] = membership_table{};
         }
 
-        template <typename T>
-        void change_pool(size_t& _component_index, size_t& _current_archetype_index, size_t& _new_archetype_index) 
-        {
-            if (m_data.archetypes.mask[_current_archetype_index].test(store_index<T>{}))
-            {
-                auto& _pool = get_pool<T>(_current_archetype_index);
+        // ----------------------------------------------------------------------------
+        // Group management 
+        // ----------------------------------------------------------------------------
 
-                if (m_data.archetypes.mask[_new_archetype_index].test(store_index<T>{}))
-                {
-                    T& _component = _pool[_component_index];
-
-                    add_to_pool(_new_archetype_index, _component);   
-                }
-        
-                std::swap(_pool[_component_index], _pool[m_data.archetypes.end[_current_archetype_index] - 1]);
-            }
-        }
-
-        template <typename... Ts>
-        auto change_archetype(id& _id, bool removing_components = false) -> size_t
-        {
-            size_t _current_archetype_index = m_data.entities.archetype_index[_id];
-            size_t _component_index = m_data.entities.component_index[_id];
-
-            bitmask<N> _current_mask = m_data.archetypes.mask[_current_archetype_index];
-
-            bitmask<N> _new_mask = removing_components 
-            ? _current_mask & ~create_bitmask<Ts...>() // erase non-matching
-            : _current_mask | create_bitmask<Ts...>(); // keep both sets of bits
-
-            size_t _new_archetype_index = get_archetype(_new_mask);
-
-            (change_pool<Cs>(_component_index, _current_archetype_index, _new_archetype_index), ...);
-
-            remove_from_archetype(_id, _current_archetype_index);
-
-            add_to_archetype(_id, _new_archetype_index);
-
-            return _new_archetype_index;
-        }
-
-        template <typename T>
-        auto get_pool(size_t& _archetype_index) -> pool<T>&
-        {
-            return std::get<store<T>>(m_data.components)[_archetype_index];
-        }
-        
         template <typename... Ts, typename... Incs, typename... Excs>
         auto get_group(query_filter<include<Incs...>, exclude<Excs...>>) -> size_t
         {   
@@ -569,27 +524,74 @@ namespace ecs
             }
         }  
 
-        auto get_archetype(bitmask<N>& _archetype_mask) -> size_t
+        auto create_group(bitmask<N*2>& _group_mask, bitmask<N>& _include_filter, bitmask<N>& _exclude_filter) -> size_t 
         {
-            if (!m_data.archetypes.index.contains(_archetype_mask))
+            size_t _group_index = m_data.groups.size;
+
+            m_data.groups.mask.emplace_back(_group_mask);
+            m_data.groups.members.emplace_back(member_table{});
+
+            m_data.groups.index[_group_mask] = _group_index;
+
+            m_data.groups.size++;
+
+            for (size_t _archetype_index = 0; _archetype_index < m_data.archetypes.size; _archetype_index++)
             {
-                return create_archetype(_archetype_mask);
-            }
-            else 
-            {
-                if (m_data.archetypes.free.contains(_archetype_mask)) // reactivate empty archetype
-                {                    
-                    return reactivate_archetype(_archetype_mask);
-                }
-                else 
+                bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
+
+                if (m_data.archetypes.alive[_archetype_index] && match_bitmask(_archetype_mask, _include_filter, _exclude_filter)) // skip empty archetypes
                 {
-                    return m_data.archetypes.index[_archetype_mask];
+                    create_member(_archetype_index, _group_index);
                 }
+            }
+
+            return _group_index;
+        }
+
+        // ----------------------------------------------------------------------------
+        // Pool & component management 
+        // ----------------------------------------------------------------------------
+
+        template <typename T>
+        auto get_pool(size_t& _archetype_index) -> pool<T>&
+        {
+            return std::get<store<T>>(m_data.components)[_archetype_index];
+        }
+
+        template <typename T>
+        void create_pool()
+        {   
+            std::get<store<T>>(m_data.components).emplace_back(pool<T>());
+        }
+
+        template <typename T>
+        void clear_pool(size_t& _archetype_index)
+        {
+            pool<T>& _pool = get_pool<T>(_archetype_index);
+
+            if (!_pool.empty()) _pool.clear();
+        }
+
+        template <typename T>
+        void change_pool(size_t& _component_index, size_t& _current_archetype_index, size_t& _new_archetype_index) 
+        {
+            if (m_data.archetypes.mask[_current_archetype_index].test(store_index<T>{}))
+            {
+                auto& _pool = get_pool<T>(_current_archetype_index);
+
+                if (m_data.archetypes.mask[_new_archetype_index].test(store_index<T>{}))
+                {
+                    T& _component = _pool[_component_index];
+
+                    add_component(_new_archetype_index, _component);   
+                }
+        
+                std::swap(_pool[_component_index], _pool[m_data.archetypes.end[_current_archetype_index] - 1]);
             }
         }
 
         template <typename T>
-        void add_to_pool(size_t& _archetype_index, T& _component) 
+        void add_component(size_t& _archetype_index, T& _component) 
         {
             size_t& _end = m_data.archetypes.end[_archetype_index];
             size_t& _total = m_data.archetypes.total[_archetype_index];
@@ -608,56 +610,8 @@ namespace ecs
             } 
         }
 
-        void add_to_group(size_t& _archetype_index, size_t& _group_index) 
-        {
-            bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
-            bitmask<N * 2>& _group_mask = m_data.groups.mask[_group_index];
-
-            bitmask<N> _include_filter;
-            bitmask<N> _exclude_filter;
-
-            for (size_t i = 0; i < N; ++i)
-            {
-                if (_group_mask.test(i)) _include_filter.set(i);
-
-                if (_group_mask.test(i + N)) _exclude_filter.set(i);
-            }
-
-            if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
-            {
-                create_member(_archetype_index, _group_index);
-            }
-        }
-
-        void add_to_archetype(id& _id, size_t& _archetype_index)
-        {
-            size_t& _end = m_data.archetypes.end[_archetype_index];
-
-            size_t& _total = m_data.archetypes.total[_archetype_index];
-            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
-
-            size_t _component_index = _end; // will always be the last valid index + 1
-
-            if (_end < _total)
-            {
-                // index was reused
-                _entity_ids[_end] = _id;
-                _end++;
-            }
-            else 
-            {
-                // new index was created
-                _entity_ids.emplace_back(_id);
-                _end++;
-                _total++;
-            } 
-
-            m_data.entities.archetype_index[_id] = _archetype_index;
-            m_data.entities.component_index[_id] = _component_index;
-        }
-
         template <typename T>
-        void remove_from_pool(size_t& _component_index, size_t& _archetype_index) 
+        void remove_component(size_t& _component_index, size_t& _archetype_index) 
         {
             size_t _store_index = store_index<T>{};
 
@@ -671,67 +625,112 @@ namespace ecs
             }
         }
 
-        void remove_from_group(size_t& _archetype_index, size_t& _group_index, size_t& _member_index)
+        // ----------------------------------------------------------------------------
+        // Archetype management 
+        // ----------------------------------------------------------------------------
+
+        auto get_archetype(bitmask<N>& _archetype_mask) -> size_t
         {
-            assert(m_data.groups.members[_group_index].archetype_index[_member_index] == _archetype_index);
-
-            size_t _index_to_swap = m_data.groups.members[_group_index].size - 1;
-
-            std::swap(m_data.groups.members[_group_index].archetype_index[_member_index], m_data.groups.members[_group_index].archetype_index[_index_to_swap]);
-            std::swap(m_data.groups.members[_group_index].membership_index[_member_index], m_data.groups.members[_group_index].membership_index[_index_to_swap]);
-
-            m_data.groups.members[_group_index].archetype_index.pop_back();
-            m_data.groups.members[_group_index].membership_index.pop_back();
-            m_data.groups.members[_group_index].size--;
-
-            // update archetype member
-
-            size_t _swapped_archetype_index = m_data.groups.members[_group_index].archetype_index[_member_index];
-            size_t _swapped_membership_index = m_data.groups.members[_group_index].membership_index[_member_index];
-
-            m_data.archetypes.memberships[_swapped_archetype_index].member_index[_swapped_membership_index] = _member_index;
-        }   
-        
-        void remove_from_archetype(id& _id, size_t& _archetype_index) 
-        {
-            std::vector<id>& _entity_ids = m_data.archetypes.entity_ids[_archetype_index];
-            size_t& _component_index = m_data.entities.component_index[_id];
-            size_t& _end = m_data.archetypes.end[_archetype_index];
-
-            std::swap(_entity_ids[_component_index], _entity_ids[_end - 1]);
-            id _swapped_id = _entity_ids[_component_index];
-            m_data.entities.component_index[_swapped_id] = _component_index;
-            _end--;
-
-            if (_end == 0 && _archetype_index != 0)
+            if (!m_data.archetypes.index.contains(_archetype_mask))
             {
-                deactivate_archetype(_archetype_index);
+                return m_data.archetypes.free.empty() 
+                    ? create_archetype(_archetype_mask)
+                    : reuse_archetype(_archetype_mask); 
             }
+            else 
+            {
+                return m_data.archetypes.index[_archetype_mask];
+            }
+        }
+
+        auto create_archetype(bitmask<N>& _archetype_mask) -> size_t
+        {
+            size_t _archetype_index = m_data.archetypes.size;
+
+            m_data.archetypes.end.emplace_back(0);
+            m_data.archetypes.total.emplace_back(0);
+            m_data.archetypes.version.emplace_back(0);
+            m_data.archetypes.alive.emplace_back(true);
+            m_data.archetypes.mask.emplace_back(_archetype_mask);
+            m_data.archetypes.entity_ids.emplace_back(std::vector<id>{});
+            m_data.archetypes.memberships.emplace_back(membership_table{});
+            (create_pool<Cs>(),...);
+            m_data.archetypes.size++;
+
+            create_memberships(_archetype_index);
+
+            m_data.archetypes.index[_archetype_mask] = _archetype_index;
+
+            return _archetype_index;
+        }
+
+        auto reuse_archetype(bitmask<N>& _archetype_mask) -> size_t
+        {
+            size_t _archetype_index = m_data.archetypes.free.back();
+
+            m_data.archetypes.mask[_archetype_index] = _archetype_mask;
+            m_data.archetypes.index[_archetype_mask] = _archetype_index;
+            m_data.archetypes.alive[_archetype_index] = true;
+            create_memberships(_archetype_index);
+            m_data.archetypes.version[_archetype_index]++;
+            m_data.archetypes.free.pop_back();
+
+            return _archetype_index;
+        }
+
+        void destroy_archetype(size_t& _archetype_index)
+        {            
+            destroy_memberships(_archetype_index);
+            m_data.archetypes.end[_archetype_index] = 0;
+            m_data.archetypes.total[_archetype_index] = 0;
+            m_data.archetypes.alive[_archetype_index] = false;
+            m_data.archetypes.entity_ids[_archetype_index].clear();
+            (clear_pool<Cs>(_archetype_index),...);
+            m_data.archetypes.index.erase(m_data.archetypes.mask[_archetype_index]);
+            m_data.archetypes.free.emplace_back(_archetype_index);
+        }
+
+        template <typename... Ts>
+        auto change_archetype(id& _id, bool removing_components = false) -> size_t
+        {
+            size_t _current_archetype_index = m_data.entities.archetype_index[_id.index];
+            size_t _component_index = m_data.entities.component_index[_id.index];
+
+            bitmask<N> _current_mask = m_data.archetypes.mask[_current_archetype_index];
+
+            bitmask<N> _new_mask = removing_components 
+            ? _current_mask & ~create_bitmask<Ts...>() // erase non-matching
+            : _current_mask | create_bitmask<Ts...>(); // keep both sets of bits
+
+            size_t _new_archetype_index = get_archetype(_new_mask);
+
+            (change_pool<Cs>(_component_index, _current_archetype_index, _new_archetype_index), ...);
+
+            remove_id(_id, _current_archetype_index);
+            add_id(_id, _new_archetype_index);
+
+            return _new_archetype_index;
         }
 
         public:
 
-            bool exists(id _id) 
+            bool is_valid(id _id) 
             {
-                return _id < m_data.entities.size;
+                return _id.index < m_data.entities.size 
+                && _id.version == m_data.entities.version[_id.index];
             }
 
-            bool empty(id _id)
+            bool is_alive(id _id)
             {
-                if (exists(_id))
-                {
-                    return m_data.entities.archetype_index[_id] == 0;
-                }
-
-                return false;
+                return is_valid(_id) && m_data.entities.alive[_id.index];
             }
 
             template <typename T, typename... Ts>
             bool has(id _id) 
             {   
-                if (exists(_id))
+                if (is_alive(_id))
                 {
-                    size_t& _archetype_index = m_data.entities.archetype_index[_id];
+                    size_t& _archetype_index = m_data.entities.archetype_index[_id.index];
                     bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
 
                     if constexpr (sizeof...(Ts) == 0)
@@ -747,59 +746,40 @@ namespace ecs
 
                 return false;
             }   
+            
+            auto version(size_t _entity_index)
+            {
+                return m_data.entities.version[_entity_index];
+            }
 
             template <typename... Ts>
             auto create(Ts&&... _components) -> id 
             {
-                bitmask<N> _empty_mask;
+                id _id = get_id();
 
-                size_t _empty_index = get_archetype(_empty_mask);
-                
-                size_t& _end = m_data.archetypes.end[_empty_index];
+                bitmask _archetype_mask = create_bitmask<Ts...>();
+                size_t _archetype_index = get_archetype(_archetype_mask);
 
-                id _id;
+                add_id(_id, _archetype_index);
 
-                if (_end > 0)
-                {
-                    _id = m_data.archetypes.entity_ids[_empty_index][_end - 1]; // reuse empty index
-                }
-                else 
-                {
-                    _id = m_data.entities.size;
-
-                    m_data.entities.component_index.emplace_back(_end);
-                    m_data.entities.archetype_index.emplace_back(_empty_index);
-                    
-                    add_to_archetype(_id, _empty_index); // create new and add to empty
-
-                    m_data.entities.size++;
-                }
-
-                if constexpr (sizeof...(Ts) > 0)
-                {
-                    size_t _new_archetype_index = change_archetype<Ts...>(_id);
-                    (add_to_pool<Ts>(_new_archetype_index, _components),...);                
-                }
+                (add_component<Ts>(_archetype_index, _components),...);                
 
                 return _id;
             }
 
             void destroy(id _id) 
             {
-                if (!empty(_id))
-                {
-                    size_t _component_index = m_data.entities.component_index[_id];
-                    size_t _archetype_index = m_data.entities.archetype_index[_id];
+                if (!is_alive(_id)) return;
 
-                    // only non-empty
-                    (remove_from_pool<Cs>(_component_index, _archetype_index),...);
+                size_t _component_index = m_data.entities.component_index[_id.index];
+                size_t _archetype_index = m_data.entities.archetype_index[_id.index];
 
-                    remove_from_archetype(_component_index, _archetype_index);
+                // only non-empty
+                (remove_component<Cs>(_component_index, _archetype_index),...);
 
-                    _archetype_index = 0;
+                remove_id(_id, _archetype_index);
 
-                    add_to_archetype(_id, _archetype_index);
-                }
+                destroy_id(_id);
             }
 
             template <typename T, typename... Ts>
@@ -809,8 +789,8 @@ namespace ecs
                 {
                     size_t _new_archetype_index = change_archetype<T, Ts...>(_id);
 
-                    add_to_pool<T>(_new_archetype_index, _component);
-                    (add_to_pool<Ts>(_new_archetype_index, _components),...);
+                    add_component<T>(_new_archetype_index, _component);
+                    (add_component<Ts>(_new_archetype_index, _components),...);
                 }
             }
 
@@ -826,11 +806,11 @@ namespace ecs
             template <typename T, typename... Ts>
             auto get(id _id) -> std::tuple<T&, Ts&...>
             {
-                size_t _component_index = m_data.entities.component_index[_id];
-                size_t _archetype_index = m_data.entities.archetype_index[_id];
+                size_t _component_index = m_data.entities.component_index[_id.index];
+                size_t _archetype_index = m_data.entities.archetype_index[_id.index];
 
                 return std::tie<T, Ts...>(
-                    get_pool<T>(_archetype_index)[_component_index],  
+                    get_pool<T>(_archetype_index)[_component_index],
                     get_pool<Ts>(_archetype_index)[_component_index]...
                 );
             }
@@ -886,11 +866,6 @@ namespace ecs
             {
                 return m_data;
             }
-
-            auto config() -> world_config&
-            {
-                return m_config;
-            }
     };
 
     // ----------------------------------------------------------------------------
@@ -924,6 +899,7 @@ namespace ecs
     {
         size_t _total = sizeof(_archetypes);
 
+        _total += _archetypes.free.capacity()        * sizeof(size_t);
         _total += _archetypes.end.capacity()         * sizeof(size_t);
         _total += _archetypes.total.capacity()       * sizeof(size_t);
         _total += _archetypes.version.capacity()     * sizeof(size_t);
@@ -949,7 +925,9 @@ namespace ecs
     {
         return sizeof(_entities)
             + _entities.component_index.capacity() * sizeof(size_t)
-            + _entities.archetype_index.capacity() * sizeof(size_t);
+            + _entities.archetype_index.capacity() * sizeof(size_t)
+            + _entities.free.capacity() * sizeof(size_t);
+
     };
 
     template <size_t N>
@@ -988,7 +966,6 @@ namespace ecs
             + memory_usage(_data.archetypes)
             + memory_usage(_data.entities)
             + memory_usage<Cs...>(_data.components)
-            + memory_usage(_data.archetypes.free)
             + memory_usage(_data.archetypes.index)
             + memory_usage(_data.groups.index);
     }

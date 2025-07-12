@@ -3,7 +3,7 @@
 
 #include "../model.hpp"
 
-size_t entity_count = 0;
+size_t entity_count = 10;
 
 template <typename F>
 void benchmark(std::string msg, F func, int iterations = 1000)
@@ -29,22 +29,19 @@ void benchmark(std::string msg, F func, int iterations = 1000)
 void benchmark_create()
 {
     benchmark("Create 3 components:", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.create(Health{}, Position{}, Detector{});
-        }
-    }, 1);
+        test_world.create(Health{}, Position{}, Detector{});
+    }, entity_count);
 }
 
 void benchmark_destroy()
 {
-    benchmark("Destroy:", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.destroy(i);
-        }
+    size_t counter = 0;
 
-    }, 1);
+    benchmark("Destroy:", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.destroy(id);
+        counter++;
+    }, entity_count);
 }
 
 void benchmark_iter()
@@ -100,76 +97,83 @@ void benchmark_query()
     });
 }
 
-void benchmark_remove()
-{
-    benchmark("1-component remove: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.remove<Health>(i);
-        }
-    }, 1);
-
-    benchmark("2-component remove: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.remove<Position, Detector>(i);
-        }
-    }, 1);
-}
-
 void benchmark_add()
 {
-    benchmark("1-component add: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.add(i, Sprite{});
-        }
-    }, 1);
+    size_t counter = 0;
+    benchmark("1-component add: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.add(id, Sprite{});   
+        counter++;
+    }, entity_count);
 
-    benchmark("2-component add: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.add(i, Shape{}, Texture{});
-        }
-    }, 1);
+    counter = 0;
+    benchmark("2-component add: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.add(id, Shape{}, Texture{});
+        counter++;
+    }, entity_count);
 
-    benchmark("3-component add: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            test_world.add(i, Scale{}, Rotation{}, Velocity{});
-        }
-    }, 1);
+    counter = 0;
+    benchmark("3-component add: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.add(id, Scale{}, Rotation{}, Velocity{});
+        counter++;
+    }, entity_count);
 }
 
-void benchmark_get()
+void benchmark_remove()
 {
-    benchmark("1-component get: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            auto [ health ] = test_world.get<Health>(i);
-            health.value++;
-        }
-    });
+    size_t counter = 0;
+    benchmark("1-component remove: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.remove<Sprite>(id);
+        counter++;
+    }, entity_count);
 
-    benchmark("2-component get: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            auto [ pos, health ] = test_world.get<Position, Health>(i);
-            health.value++;
-            pos.x++;  
-        }
-    });
+    counter = 0;
+    benchmark("2-component remove: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.remove<Shape, Texture>(id);
+        counter++;
+    }, entity_count);
 
-    benchmark("3-component get: ", [](){
-        for (size_t i = 0; i < entity_count; i++)
-        {
-            auto [ pos, health, det ] = test_world.get<Position, Health, Detector>(i);
-            health.value++;
-            pos.x++;  
-            det.target++;      
-        }
-    });
+    counter = 0;
+    benchmark("3-component remove: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        test_world.remove<Scale, Rotation, Velocity>(id);
+        counter++;
+    }, entity_count);
 }
+
+// void benchmark_get()
+// {
+//     benchmark("1-component get: ", [](){
+//         for (size_t i = 0; i < entity_count; i++)
+//         {
+//             auto [ health ] = test_world.get<Health>(i);
+//             health.value++;
+//         }
+//     });
+
+//     benchmark("2-component get: ", [](){
+//         for (size_t i = 0; i < entity_count; i++)
+//         {
+//             auto [ pos, health ] = test_world.get<Position, Health>(i);
+//             health.value++;
+//             pos.x++;  
+//         }
+//     });
+
+//     benchmark("3-component get: ", [](){
+//         for (size_t i = 0; i < entity_count; i++)
+//         {
+//             auto [ pos, health, det ] = test_world.get<Position, Health, Detector>(i);
+//             health.value++;
+//             pos.x++;  
+//             det.target++;      
+//         }
+//     });
+// }
 
 void benchmark_queue()
 {
@@ -178,10 +182,11 @@ void benchmark_queue()
         test_world.queue([](){
             for (size_t i = 0; i < entity_count; i++)
             {
-                test_world.add(i, Health{});        
+                const EntityId id = {i, 0};
+
+                test_world.add(id, Health{});        
             }
         });
-
     }, 1);
 
     benchmark("Update add 1 component:", [](){
@@ -193,7 +198,8 @@ void benchmark_queue()
         test_world.queue([](){
             for (size_t i = 0; i < entity_count; i++)
             {
-                test_world.add(i, Position{}, Detector{});        
+                const EntityId id = {i, 0};
+                test_world.add(id, Position{}, Detector{});        
             }
         });
     }, 1);
@@ -214,21 +220,19 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
-    test_world.config().max_empty_archetypes = 1;
-
     explode_archetypes();
 
     benchmark_create();
-    benchmark_get();
+    // //benchmark_get();
     benchmark_add();
     benchmark_query();
     benchmark_iter();
     benchmark_remove();
     benchmark_destroy();
-    benchmark_queue();
+    //benchmark_queue();
 
-    print_archetypes();
     print_metadata();
+    print_archetypes();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

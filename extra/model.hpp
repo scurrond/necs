@@ -26,7 +26,6 @@ struct Hitbox {};
 struct Material {};
 struct Texture {};
 
-
 // GLOBAL WORLD
 
 struct World : public ecs::world<Position, Health, Detector, Name, Sprite, Collider, Rotation, Scale, Shape, Gravity, Velocity, Damage, Hurtbox, Hitbox, Material, Texture> {};
@@ -34,6 +33,7 @@ inline World test_world;
 
 // ITEMS & QUERIES
 
+using NullItem = Item<>;
 using SingleItem = Item<Position>;
 using DoubleItem = Item<const Position, Health>;
 using TripleItem = Item<Position, Health, Detector>;
@@ -110,7 +110,7 @@ inline void print_archetypes()
         std::cout << "Archetype: ";
         std::cout << "\n - Index: " << i;
         std::cout << "\n - End: " << data.archetypes.end.at(i);
-        std::cout << "\n - Total: " << data.archetypes.total.at(i);
+        std::cout << "\n - Total: " << data.archetypes.entity_ids.at(i).size();
         std::cout << "\n - Version: " << data.archetypes.version.at(i);
 
         std::cout << "\n - Bitmask: ";
@@ -125,8 +125,8 @@ inline void print_archetypes()
             EntityId id = data.archetypes.entity_ids.at(i).at(j);
 
             std::cout << "\n ---- Entity " << j << ":";
-            std::cout << " id: " << id;
-            std::cout << " component index: " << data.entities.component_index.at(id);
+            std::cout << " id index: " << id.index << ", version: " << id.version;
+            std::cout << " component index: " << data.entities.component_index.at(id.index);
         }
 
         std::cout << "\n - Membership in " << data.archetypes.memberships.at(i).size << " groups: ";

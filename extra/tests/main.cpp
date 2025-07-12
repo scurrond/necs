@@ -2,7 +2,7 @@
 #include <iostream>
 #include <stdexcept>
 
-inline EntityId id = 0;
+inline EntityId id = { 0, 0 };
 
 template <typename C>
 C& test_get(EntityId id)
@@ -34,9 +34,9 @@ void test_create()
 
     std::cout << "Created entity:";
 
-    std::cout << "\n - Id:  " << id;
-    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
-    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
+    std::cout << "\n - Id index: " << id.index << ", version: " << id.version;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id.index);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id.index);
 
     std::cout << "\nComponents:";
 
@@ -62,9 +62,9 @@ void test_add()
 
     std::cout << "Added component:";
 
-    std::cout << "\n - Id:  " << id;
-    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
-    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
+    std::cout << "\n - Id index: " << id.index << ", version: " << id.version;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id.index);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id.index);
 
     std::cout << "\nComponents:";
 
@@ -93,9 +93,9 @@ void test_remove()
 
     std::cout << "Removed component:";
 
-    std::cout << "\n - Id:  " << id;
-    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
-    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
+    std::cout << "\n - Id index: " << id.index << ", version: " << id.version;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id.index);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id.index);
 
     std::cout << "\nComponents:";
 
@@ -121,9 +121,9 @@ void test_destroy()
 
     std::cout << "Destroyed entity:";
 
-    std::cout << "\n - Id:  " << id;
-    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
-    std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
+    std::cout << "\n - Id index: " << id.index << ", version: " << id.version;
+    std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id.index);
+    std::cout << "\n - Component index:  " << data.entities.component_index.at(id.index);
 
     std::cout << "\n------------------------------------------------\n";
 }
@@ -137,9 +137,9 @@ void test_query()
         std::cout << "------------------------------------------------\n";
 
         std::cout << "Querying entity:";
-        std::cout << "\n - Id:  " << id;
-        std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id);
-        std::cout << "\n - Component index:  " << data.entities.component_index.at(id);
+        std::cout << "\n - Id index: " << id.index << ", version: " << id.version;
+        std::cout << "\n - Archetype index:  " << data.entities.archetype_index.at(id.index);
+        std::cout << "\n - Component index:  " << data.entities.component_index.at(id.index);
         std::cout << "\nComponents:";
         std::cout << "\n - Health: " << health.value;
         std::cout << "\n - Position: x: " << pos.x << " y: " << pos.y;
@@ -158,7 +158,6 @@ void test_queue()
         std::cout << "------------------------------------------------\n";
 
         std::cout << "Executing queue entry";
-        std::cout << "\n - Id:  " << id;
 
         std::cout << "\n------------------------------------------------\n";
 
@@ -192,8 +191,8 @@ void test_update()
 int main()
 {
     std::cout << "=== Running tests ===\n";
-    
-    explode_archetypes();
+        
+    //explode_archetypes();
 
     test_create();
     test_add();
