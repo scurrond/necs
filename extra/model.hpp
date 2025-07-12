@@ -90,8 +90,6 @@ inline void print_metadata()
         << "\n ---- Entities: "  << ecs::memory_usage(data.entities) / 1000  << " KB"
         << "\n ---- Components: "  << ecs::memory_usage<Cs...>(data.components) / 1000  << " KB"
         << "\n ---- Archetypes: "  << ecs::memory_usage(data.archetypes) / 1000  << " KB"
-        << "\n ---- Archetype index map: "  << ecs::memory_usage(data.archetypes.index) / 1000  << " KB"
-        << "\n ---- Group index map: "  << ecs::memory_usage(data.groups.index) / 1000  << " KB"
         << "\n ---- Total: "  << ecs::memory_usage(data) / 1000  << " KB"
 
         << "\n------------------------------------------------";

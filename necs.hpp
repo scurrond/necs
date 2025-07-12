@@ -10,6 +10,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -119,10 +120,11 @@ namespace ecs
     {
         size_t size = 0;   // total groups in this table
 
-        std::vector<bitmask<N*2>>                mask;     // the bitmask of the group
-        std::vector<member_table>                members;  // archetype indices matching the group
+        std::vector<bitmask<N*2>>                   mask;     // the bitmask of the group
+        std::vector<member_table>                   members;  // living archetype indices matching the group
+        std::vector<std::unordered_set<bitmask<N>>> cache;    // archetype bitmasks matching each group
 
-        std::unordered_map<bitmask<N*2>, size_t> index;    // indices of all the groups in the system
+        std::unordered_map<bitmask<N*2>, size_t>    index;    // indices of all the groups in the system
     };
 
     // ----------------------------------------------------------------------------
@@ -457,20 +459,29 @@ namespace ecs
             for (size_t _group_index = 0; _group_index < m_data.groups.size; _group_index++)
             {
                 bitmask<N>& _archetype_mask = m_data.archetypes.mask[_archetype_index];
-                bitmask<N * 2>& _group_mask = m_data.groups.mask[_group_index];
 
-                bitmask<N> _include_filter;
-                bitmask<N> _exclude_filter;
-
-                for (size_t i = 0; i < N; ++i)
-                {
-                    _include_filter[i] = _group_mask[i];
-                    _exclude_filter[i] = _group_mask[i + N];
-                }
-
-                if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
+                if (m_data.groups.cache[_group_index].contains(_archetype_mask))
                 {
                     create_member(_archetype_index, _group_index);
+                }
+                else 
+                {
+                    bitmask<N * 2>& _group_mask = m_data.groups.mask[_group_index];
+
+                    bitmask<N> _include_filter;
+                    bitmask<N> _exclude_filter;
+
+                    for (size_t i = 0; i < N; ++i)
+                    {
+                        _include_filter[i] = _group_mask[i];
+                        _exclude_filter[i] = _group_mask[i + N];
+                    }
+
+                    if ((_include_filter & _archetype_mask) == _include_filter && (_exclude_filter & _archetype_mask).none())
+                    {
+                        create_member(_archetype_index, _group_index);
+                        m_data.groups.cache[_group_index].insert(_archetype_mask);
+                    }
                 }
             }
         }
@@ -530,6 +541,7 @@ namespace ecs
 
             m_data.groups.mask.emplace_back(_group_mask);
             m_data.groups.members.emplace_back(member_table{});
+            m_data.groups.cache.emplace_back(std::unordered_set<bitmask<N>>{});
 
             m_data.groups.index[_group_mask] = _group_index;
 
@@ -615,9 +627,7 @@ namespace ecs
         {
             size_t _store_index = store_index<T>{};
 
-            bitmask<N>& _current_archetype_mask = m_data.archetypes.mask[_archetype_index];
-
-            if (_current_archetype_mask.test(_store_index))
+            if (m_data.archetypes.mask[_archetype_index].test(_store_index))
             {
                 pool<T>& _pool = get_pool<T>(_archetype_index);
         
@@ -872,6 +882,30 @@ namespace ecs
     // Memory usage
     // ----------------------------------------------------------------------------
 
+    template <typename K, typename V>
+    inline auto memory_usage(const std::unordered_map<K, V>& _map) -> float
+    {
+        size_t _total = sizeof(_map);
+
+        _total += _map.bucket_count() * sizeof(void*);
+
+        _total += _map.size() * (sizeof(K) + sizeof(V) + sizeof(void*)); 
+
+        return _total;
+    }
+
+    template <typename V>
+    inline auto memory_usage(const std::unordered_set<V>& _set) -> float
+    {
+        size_t _total = sizeof(_set);
+
+        _total += _set.bucket_count() * sizeof(void*);
+
+        _total += _set.size() * (sizeof(V) + sizeof(void*)); 
+
+        return _total;
+    }
+
     template <typename C>
     inline auto memory_usage(const store<C>& _store) -> float
     {
@@ -899,6 +933,7 @@ namespace ecs
     {
         size_t _total = sizeof(_archetypes);
 
+        _total += _archetypes.alive.capacity();
         _total += _archetypes.free.capacity()        * sizeof(size_t);
         _total += _archetypes.end.capacity()         * sizeof(size_t);
         _total += _archetypes.total.capacity()       * sizeof(size_t);
@@ -918,12 +953,15 @@ namespace ecs
             _total += _memberships.member_index.capacity() * sizeof(size_t);
         }
 
+        _total += memory_usage(_archetypes.index);
+
         return _total;
     };
 
     inline auto memory_usage(const entity_table& _entities) -> float
     {
         return sizeof(_entities)
+            + _entities.alive.capacity()
             + _entities.component_index.capacity() * sizeof(size_t)
             + _entities.archetype_index.capacity() * sizeof(size_t)
             + _entities.free.capacity() * sizeof(size_t);
@@ -944,29 +982,30 @@ namespace ecs
             _total += _members.membership_index.capacity() * sizeof(size_t);
         }
 
+        for (const std::unordered_set<bitmask<N>>& _cache : _groups.cache)
+        {
+            _total += memory_usage<bitmask<N>>(_cache);
+        }
+
+        _total += memory_usage(_groups.index);
+
         return _total;
     };
-
-    template <typename K, typename V>
-    inline auto memory_usage(const std::unordered_map<K, V>& _map) -> float
-    {
-        size_t _total = sizeof(_map);
-
-        _total += _map.bucket_count() * sizeof(void*);
-
-        _total += _map.size() * (sizeof(K) + sizeof(V) + sizeof(void*)); 
-
-        return _total;
-    }
 
     template <typename... Cs>
     inline auto memory_usage(const world_data<Cs...>& _data) -> float
     {
+        constexpr size_t N = sizeof...(Cs);
+
+        size_t _total = 0;
+        for (const std::unordered_set<bitmask<N>>& _cache : _data.groups.cache)
+        {
+            _total += memory_usage<bitmask<N>>(_cache);
+        }
+
         return memory_usage(_data.groups)
             + memory_usage(_data.archetypes)
             + memory_usage(_data.entities)
-            + memory_usage<Cs...>(_data.components)
-            + memory_usage(_data.archetypes.index)
-            + memory_usage(_data.groups.index);
+            + memory_usage<Cs...>(_data.components);
     }
 };

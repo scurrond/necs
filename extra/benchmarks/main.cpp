@@ -6,7 +6,7 @@
 size_t entity_count = 10;
 
 template <typename F>
-void benchmark(std::string msg, F func, int iterations = 1000)
+void benchmark(std::string msg, F func, int iterations = 1000, size_t entities = entity_count)
 {
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < iterations; ++i) func();
@@ -14,7 +14,7 @@ void benchmark(std::string msg, F func, int iterations = 1000)
     
     auto total_duration = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start);
     auto avg_duration = total_duration.count() / iterations;
-    float avg_per_entity = static_cast<float>(avg_duration) / static_cast<float>(entity_count); 
+    float avg_per_entity = static_cast<float>(avg_duration) / static_cast<float>(entities); 
 
     std::cout 
     << "\n------------------------------------------------"
@@ -22,7 +22,7 @@ void benchmark(std::string msg, F func, int iterations = 1000)
     << "\n - Average duration: " << avg_duration << "ns"
     << "\n - Average per entity: " << avg_per_entity << "ns"
     << "\n - Iterations: " << iterations
-    << "\n - Entities: " << entity_count
+    << "\n - Entities: " << entities
     << "\n------------------------------------------------";
 }
 
@@ -30,7 +30,7 @@ void benchmark_create()
 {
     benchmark("Create 3 components:", [](){
         test_world.create(Health{}, Position{}, Detector{});
-    }, entity_count);
+    }, entity_count, 1);
 }
 
 void benchmark_destroy()
@@ -41,7 +41,7 @@ void benchmark_destroy()
         const EntityId id = {counter, test_world.version(counter)};
         test_world.destroy(id);
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 }
 
 void benchmark_iter()
@@ -104,21 +104,21 @@ void benchmark_add()
         const EntityId id = {counter, test_world.version(counter)};
         test_world.add(id, Sprite{});   
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 
     counter = 0;
     benchmark("2-component add: ", [&counter](){
         const EntityId id = {counter, test_world.version(counter)};
         test_world.add(id, Shape{}, Texture{});
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 
     counter = 0;
     benchmark("3-component add: ", [&counter](){
         const EntityId id = {counter, test_world.version(counter)};
         test_world.add(id, Scale{}, Rotation{}, Velocity{});
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 }
 
 void benchmark_remove()
@@ -128,52 +128,55 @@ void benchmark_remove()
         const EntityId id = {counter, test_world.version(counter)};
         test_world.remove<Sprite>(id);
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 
     counter = 0;
     benchmark("2-component remove: ", [&counter](){
         const EntityId id = {counter, test_world.version(counter)};
         test_world.remove<Shape, Texture>(id);
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 
     counter = 0;
     benchmark("3-component remove: ", [&counter](){
         const EntityId id = {counter, test_world.version(counter)};
         test_world.remove<Scale, Rotation, Velocity>(id);
         counter++;
-    }, entity_count);
+    }, entity_count, 1);
 }
 
-// void benchmark_get()
-// {
-//     benchmark("1-component get: ", [](){
-//         for (size_t i = 0; i < entity_count; i++)
-//         {
-//             auto [ health ] = test_world.get<Health>(i);
-//             health.value++;
-//         }
-//     });
+void benchmark_get()
+{
+    size_t counter = 0;
+    benchmark("1-component get: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        auto [ health ] = test_world.get<Health>(id);
+        health.value++;   
 
-//     benchmark("2-component get: ", [](){
-//         for (size_t i = 0; i < entity_count; i++)
-//         {
-//             auto [ pos, health ] = test_world.get<Position, Health>(i);
-//             health.value++;
-//             pos.x++;  
-//         }
-//     });
+        counter++;
+    }, entity_count, 1);
 
-//     benchmark("3-component get: ", [](){
-//         for (size_t i = 0; i < entity_count; i++)
-//         {
-//             auto [ pos, health, det ] = test_world.get<Position, Health, Detector>(i);
-//             health.value++;
-//             pos.x++;  
-//             det.target++;      
-//         }
-//     });
-// }
+    counter = 0;
+    benchmark("2-component get: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        auto [ pos, health ] = test_world.get<Position, Health>(id);
+        health.value++;
+        pos.x++;  
+
+        counter++;
+    }, entity_count, 1);
+
+    counter = 0;
+    benchmark("3-component get: ", [&counter](){
+        const EntityId id = {counter, test_world.version(counter)};
+        auto [ pos, health, det ] = test_world.get<Position, Health, Detector>(id);
+        health.value++;
+        pos.x++;  
+        det.target++;    
+
+        counter++;
+    }, entity_count, 1);
+}
 
 void benchmark_queue()
 {
@@ -223,7 +226,7 @@ int main(int argc, char* argv[])
     explode_archetypes();
 
     benchmark_create();
-    // //benchmark_get();
+    benchmark_get();
     benchmark_add();
     benchmark_query();
     benchmark_iter();
