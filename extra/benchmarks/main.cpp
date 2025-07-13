@@ -214,7 +214,7 @@ int main(int argc, char* argv[])
 
     std::cout << "\n=== Running benchmarks for: " << entity_count << " entities ===";
 
-    explode_archetypes();
+    test_world.explode_archetypes();
 
     benchmark_create();
     benchmark_get();
@@ -226,6 +226,7 @@ int main(int argc, char* argv[])
     benchmark_queue();
 
     print_metadata();
+    print_archetypes();
 
     std::cout << "\n=== Benchmarks succeeded ===\n";
 

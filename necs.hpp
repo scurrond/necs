@@ -233,14 +233,81 @@ namespace ecs
             return std::get<store<C>&>(m_data.stores)[_archetype_index];
         }
 
+        auto get_item(size_t& _archetype_index, size_t& _component_index) -> item<Cs...>
+        {
+            const id& _id = m_data.archetypes.entity_ids[_archetype_index][_component_index];
+
+            return std::tie(_id, get_pool<Cs>(_archetype_index)[_component_index]...);
+        }
+
         public:
 
             query_result(query_data<N, Cs...>&& _data)
             : m_data(_data) {}
 
+            bool has_member(size_t _member_index)
+            {
+                return member_count() > _member_index;
+            }
+
+            bool has_members()
+            {
+                return member_count() > 0;
+            }
+
+            bool has_entity(size_t _member_index, size_t _component_index)
+            {
+                return entity_count(_member_index) > _component_index;            
+            }
+
+            bool has_entities(size_t _member_index)
+            {
+                if (!has_member(_member_index)) return true;
+
+                size_t _archetype_index = m_data.groups.members[m_data.group_index].archetype_index[_member_index];
+
+                return m_data.archetypes.end[_archetype_index] > 0;
+            }
+
+            auto member_count() -> size_t
+            {
+                return m_data.groups.members[m_data.group_index].size;
+            }
+
+            auto entity_count(size_t _member_index) -> size_t
+            {
+                if (!has_member(_member_index)) return 0;
+
+                size_t _archetype_index = m_data.groups.members[m_data.group_index].archetype_index[_member_index];
+
+                return m_data.archetypes.end[_archetype_index];
+            }
+
+            auto entity_count() -> size_t
+            {
+                size_t _total = 0;
+
+                for (size_t _archetype_index : m_data.groups.members[m_data.group_index].archetype_index)
+                {
+                    _total += m_data.archetypes.end[_archetype_index];
+                }
+
+                return _total;
+            }
+
             auto read() const -> const query_data<N, Cs...>&
             {
                 return m_data;
+            }
+
+            auto first() -> item<Cs...>
+            {
+                return get_item(m_data.groups.members[m_data.group_index].archetype_index[0], 0);
+            }
+
+            auto try_first() -> std::optional<item<Cs...>>
+            {
+                return !has_members(0) ? first() : std::nullopt;
             }
 
             template <typename Callback>
@@ -252,9 +319,7 @@ namespace ecs
                     {
                         for (size_t _component_index = 0; _component_index < m_data.archetypes.end[_archetype_index]; _component_index++)
                         {
-                            const id& _id = m_data.archetypes.entity_ids[_archetype_index][_component_index];
-
-                            _callback(std::tie(_id, get_pool<Cs>(_archetype_index)[_component_index]...));
+                            _callback(get_item(_archetype_index, _component_index));
                         }
                     }
                 }
@@ -722,6 +787,23 @@ namespace ecs
         }
 
         public:
+            // ----------------------------------------------------------------------------
+            // Const access
+            // ----------------------------------------------------------------------------
+
+            // Number of components in this world.
+            static constexpr size_t MAX_COMPONENT_COUNT = N;
+            // Number of max possible archetype combinations for this world's component count.
+            static constexpr size_t MAX_ARCHETYPE_COUNT = (1 << N);
+
+            auto read() const -> const world_data<Cs...>&
+            {
+                return m_data;
+            }
+
+            // ----------------------------------------------------------------------------
+            // Checks
+            // ----------------------------------------------------------------------------
 
             bool is_valid(id _id) 
             {
@@ -755,7 +837,7 @@ namespace ecs
 
                 return false;
             }   
-            
+
             auto version(size_t _entity_index) -> size_t
             {
                 return m_data.entities.version[_entity_index];
@@ -774,6 +856,15 @@ namespace ecs
                 (add_component<Ts>(_archetype_index, _components),...);                
 
                 return _id;
+            }
+
+            template <typename... Ts>
+            void populate(size_t _count, Ts&&... _components)
+            {
+                for (size_t i = 0; i < _count; i++)
+                {
+                    create(_components...);
+                }
             }
 
             void destroy(id _id) 
@@ -876,9 +967,30 @@ namespace ecs
                 m_queue = world_queue{};
             }
 
-            auto read() const -> const world_data<Cs...>&
+            /**
+            * Explodes archetypes by adding and removing entities. This will automatically populate group caches.
+            * @param _max Stop condition. Default 0 initializes all possible archetype combinations.
+            */
+            void explode_archetypes(size_t _max = 0)
             {
-                return m_data;
+                using components = std::tuple<Cs...>; 
+
+                auto _combine = [&](bitmask<N>&& _mask)
+                {
+                    id _id = create();
+
+                    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+                        ((_mask[Is] ? add(_id, std::decay_t<std::tuple_element_t<Is, components>>{}) : void()), ...);
+                    }(std::make_index_sequence<N>{});
+
+                    destroy(_id);
+                };
+
+                for (size_t i = 1; i < MAX_ARCHETYPE_COUNT; ++i)
+                {
+                    if (_max > 0 && i >= _max) break;
+                    _combine(bitmask<N>(i));
+                }
             }
     };
 

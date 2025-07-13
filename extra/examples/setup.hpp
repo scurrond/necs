@@ -2,132 +2,115 @@
 
 #include "../model.hpp"
 
-using namespace ecs;
+inline ecs::id id;
 
-Registry<ArchetypeTypes, QueryTypes, EventTypes> reg;
-
-int main() 
-{    
-    auto writer = reg.get_writer();
-    auto query = reg.get_query<SingleQuery>();
-
-    writer.populate(Monster(), 100);
-
-    for (auto [pos] : query.iter())
-    {
-        pos.x--;
-    }
-
-    return 0;
-}
-
-void create()
+inline void create()
 {   
-    auto writer = reg.get_writer();
+    // Adds an empty entity to the world
+    test_world.create();
 
-    // Adds a single monster to the system
-    writer.create(Monster());
+    // Adds components to the entity if neither is present
+    test_world.add(id, Health{}, Detector{});
 
-    // Adds 100 monsters to the system, calls create under the hood
-    writer.populate(Monster(), 100);
+    // Adds an entity with Sprite and Position components to the world
+    test_world.create(Sprite{}, Position{});
+
+    // Adds 100 entities with Position, Rotation & Scale components to the world
+    test_world.populate(100, Position{}, Rotation{}, Scale{});
+
+    // Queues a create call to be executed on update
+    test_world.queue([](){
+        test_world.create(Sprite{}, Health{});
+    });
 };
 
-void events()
+inline void destroy()
 {
-    auto listener = reg.get_listener<QuitEvent>();
+    // Removes the components from the entity if both are present   
+    test_world.remove<Sprite, Rotation>(id);
 
-    // Subscribe to events    
-    listener.subscribe
-    ([](QuitEvent event){
-        // do stuff
+    // Removes the entity from the system 
+    test_world.destroy(id);
+
+    // Queues a destroy call to be executed on update
+    test_world.queue([](){
+        test_world.destroy(id);
     });
 
-    // Call events
-    listener.call(QuitEvent{});
-
-    // Disable event listener 
-    listener.close();
-
-    // Enable event listener
-    listener.open();
+    // Resets world data and task queue
+    test_world.reset();
 }
 
-void manage()
+inline void check()
 {
-    auto writer = reg.get_writer();
 
-    // Queue data for removal
-    writer.remove(0);
+    // Checks that the id exists and that the version matches
+    test_world.is_valid(id);
 
-    // Commit changes
-    writer.update();
+    // Checks valid status and then entity's alive status
+    test_world.is_alive(id);
 
-    // Clean up dead memory
-    writer.trim<Monster>();
+    // Checks if the entity has all the requested components
+    test_world.has<Sprite, Rotation>(id);
 }
 
-void check()
-{
-    // read-only info struct
-    auto reader = reg.get_reader();
-
-    // is the entity with id 0 a monster
-    reader.is_type<Monster>(0);
-
-    // is the entity with id 0 alive
-    reader.is_alive(0);
-
-    // can the entity's id be reused on death
-    reader.is_locked(0);
-
-    // does the entity have a name component
-    reader.has_component<Name>(0);
-
-    // does this archetype exist
-    reader.has_archetype<Monster>();
-}
-
-void access()
+inline void access()
 {   
-    // get a writer for all archetypes 
-    auto writer = reg.get_writer();
+    // Retrieves components directly, panics, unsafe getter
+    auto [ pos ] = test_world.get<Position>(id);
+    
+    // Retrieves components if they exist, returns nullopt otherwise
+    auto [ sprite ] = test_world.try_get<Sprite>(id).value();
 
-    // get a writer for specific archetypes 
-    auto writer2 = reg.get_writer<Monster, Tree>();
-
-    // GET returns nullopt if entity is dead or the type is incorrect
-    auto [p] = writer.get<Monster, Position>(0).value();
-
-    // FIND filters and iterates over every archetype that matches the components
-    auto [h] = writer2.find<Health>(1).value();
-
-    // ITER returns a storage iterator over some components
-    for (auto [d] : writer.iter<Monster, Detector>())
-    {
-        // do stuff
-    }
+    // Gives readonly access to the world's data
+    test_world.read(); 
 }
 
-void query()
+inline void query()
 {
-    // Retrieve a query
-    auto query = reg.get_query<QuadQuery>();
+    // Create a simple query, either when needed (will cache itself) or beforehand
+    // Queries will be valid as long as their parent world doesn't copy itself
+    auto simple_q = test_world.query<Position, Health, const Sprite>();
 
-    // Iterate with for loop 
-    for (auto [id, health, pos, det] : query.iter())
+    // Create queries with filter params
+    test_world.query<Position>(ecs::query_filter<ecs::include<Rotation>>{});
+    test_world.query<Position>(ecs::query_filter<ecs::exclude<Sprite>>{});
+    test_world.query<Position>(ecs::query_filter<ecs::include<Rotation>, ecs::exclude<Sprite>>{});
+
+    // Gives readonly access to query data
+    simple_q.read();
+
+    // More utility methods
+    simple_q.has_member(0);
+    simple_q.has_entity(0, 0);
+    simple_q.has_members();     
+    simple_q.has_entities(0);
+    simple_q.member_count(); 
+    simple_q.entity_count();
+    simple_q.entity_count(0);
+    
+    // Get first item in the query, unsafe getter
+    simple_q.first();
+
+    // Get first item in the query, safe getter, returns std::nullopt if query is empty
+    simple_q.try_first();
+
+    // Iterate with range loop
+    for (auto [id, pos, health, sprite] : simple_q)
     {
         health.value--;
         pos.x++;
-        std::cout << "Target: " << det.target;
     }
 
-    // Iterate with callback
-    query.for_each([](Item<EntityId, Health, Position, Detector> item) 
+    // Define callback arg alias if desired, must be an ecs::item matching the query's signature
+    using SimpleItem = ecs::item<Position, Health, const Sprite>;
+
+    // Iterate with callback, 2-4x faster but clunky and cannot be broken
+    simple_q.iter([](SimpleItem item) 
     {
-        auto [id, health, pos, det] = item;
+        auto [id, pos, health, sprite] = item;
 
         health.value--;
         pos.x++;
-        std::cout << "Target: " << det.target;
     });
 }
